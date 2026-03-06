@@ -1,0 +1,99 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "agent-service"}}
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {"name": "agent-lib", "version": "0.1.0"},
+          "spans": [
+            {
+              "traceId": "5b8aa5a2d2c872e8321cf37308d69df2",
+              "spanId": "0000000000000001",
+              "name": "agent.execute",
+              "kind": 1,
+              "startTimeUnixNano": "1000000000",
+              "endTimeUnixNano": "5000000000",
+              "attributes": [
+                {"key": "agent.task", "value": {"stringValue": "fix-bug-42"}}
+              ],
+              "status": {"code": 1}
+            },
+            {
+              "traceId": "5b8aa5a2d2c872e8321cf37308d69df2",
+              "spanId": "0000000000000002",
+              "parentSpanId": "0000000000000001",
+              "name": "llm.call",
+              "kind": 3,
+              "startTimeUnixNano": "1000000000",
+              "endTimeUnixNano": "2000000000",
+              "attributes": [
+                {"key": "llm.model", "value": {"stringValue": "claude-3.5-sonnet"}},
+                {"key": "llm.prompt_tokens", "value": {"intValue": "1200"}}
+              ],
+              "status": {}
+            },
+            {
+              "traceId": "5b8aa5a2d2c872e8321cf37308d69df2",
+              "spanId": "0000000000000003",
+              "parentSpanId": "0000000000000001",
+              "name": "tool.call",
+              "kind": 3,
+              "startTimeUnixNano": "2000000000",
+              "endTimeUnixNano": "2500000000",
+              "attributes": [
+                {"key": "tool.name", "value": {"stringValue": "read_file"}},
+                {"key": "tool.params.path", "value": {"stringValue": "auth.py"}}
+              ],
+              "status": {"code": 1}
+            },
+            {
+              "traceId": "5b8aa5a2d2c872e8321cf37308d69df2",
+              "spanId": "0000000000000004",
+              "parentSpanId": "0000000000000001",
+              "name": "llm.call",
+              "kind": 3,
+              "startTimeUnixNano": "2500000000",
+              "endTimeUnixNano": "3500000000",
+              "attributes": [
+                {"key": "llm.model", "value": {"stringValue": "claude-3.5-sonnet"}},
+                {"key": "llm.prompt_tokens", "value": {"intValue": "3400"}}
+              ],
+              "status": {}
+            },
+            {
+              "traceId": "5b8aa5a2d2c872e8321cf37308d69df2",
+              "spanId": "0000000000000005",
+              "parentSpanId": "0000000000000001",
+              "name": "tool.call",
+              "kind": 3,
+              "startTimeUnixNano": "3500000000",
+              "endTimeUnixNano": "4000000000",
+              "attributes": [
+                {"key": "tool.name", "value": {"stringValue": "edit_file"}},
+                {"key": "tool.params.path", "value": {"stringValue": "auth.py"}}
+              ],
+              "status": {"code": 1}
+            },
+            {
+              "traceId": "5b8aa5a2d2c872e8321cf37308d69df2",
+              "spanId": "0000000000000006",
+              "parentSpanId": "0000000000000001",
+              "name": "agent.complete",
+              "kind": 1,
+              "startTimeUnixNano": "4000000000",
+              "endTimeUnixNano": "5000000000",
+              "attributes": [
+                {"key": "agent.status", "value": {"stringValue": "success"}}
+              ],
+              "status": {"code": 1}
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

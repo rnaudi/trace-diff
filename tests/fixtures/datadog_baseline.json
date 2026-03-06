@@ -1,0 +1,67 @@
+{
+  "trace": {
+    "root_id": "100",
+    "spans": {
+      "100": {
+        "trace_id": "999",
+        "span_id": "100",
+        "parent_id": "0",
+        "start": 1772723808.972,
+        "end": 1772723808.996,
+        "duration": 0.024,
+        "status": "ok",
+        "type": "web",
+        "service": "my-service",
+        "name": "spring.handler",
+        "resource": "UsersController.create",
+        "resource_hash": "abc123",
+        "meta": { "http.method": "POST", "http.url": "/users" },
+        "metrics": { "_dd.measured": 1 },
+        "hostname": "host-1",
+        "env": "production",
+        "children_ids": ["200", "300"]
+      },
+      "200": {
+        "trace_id": "999",
+        "span_id": "200",
+        "parent_id": "100",
+        "start": 1772723808.973,
+        "end": 1772723808.990,
+        "duration": 0.017,
+        "status": "ok",
+        "type": "http",
+        "service": "my-service",
+        "name": "http.request",
+        "resource": "GET /api/data",
+        "resource_hash": "def456",
+        "meta": {},
+        "metrics": {},
+        "hostname": "host-1",
+        "env": "production",
+        "children_ids": []
+      },
+      "300": {
+        "trace_id": "999",
+        "span_id": "300",
+        "parent_id": "100",
+        "start": 1772723808.991,
+        "end": 1772723808.995,
+        "duration": 0.004,
+        "status": "error",
+        "type": "cache",
+        "service": "my-service",
+        "name": "redis.command",
+        "resource": "SET user:123",
+        "resource_hash": "ghi789",
+        "meta": { "error.message": "connection refused" },
+        "metrics": {},
+        "hostname": "host-1",
+        "env": "production",
+        "children_ids": []
+      }
+    }
+  },
+  "is_truncated": false,
+  "is_summary": false,
+  "retention_reason": "diversity-sampling"
+}

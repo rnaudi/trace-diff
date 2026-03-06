@@ -1,0 +1,1608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Erosion — Trace Diff</title>
+<style>
+/* Design tokens (GitHub Primer, dark default) */
+:root {
+  color-scheme: dark light;
+  --color-canvas-default: light-dark(#ffffff, #0d1117);
+  --color-canvas-subtle:  light-dark(#f6f8fa, #161b22);
+  --color-canvas-inset:   light-dark(#eff2f5, #010409);
+  --color-border-default: light-dark(#d0d7de, #30363d);
+  --color-border-muted:   light-dark(#d8dee4, #21262d);
+  --color-fg-default:     light-dark(#1f2328, #e6edf3);
+  --color-fg-muted:       light-dark(#656d76, #8b949e);
+  --color-fg-subtle:      light-dark(#6e7781, #484f58);
+  --color-accent-fg:      light-dark(#0969da, #58a6ff);
+  --color-success-fg:     light-dark(#1a7f37, #3fb950);
+  --color-success-subtle: light-dark(#dafbe1, #0d2818);
+  --color-danger-fg:      light-dark(#cf222e, #f85149);
+  --color-danger-subtle:  light-dark(#ffebe9, #2d1013);
+  --color-attention-fg:   light-dark(#9a6700, #d29922);
+  --color-attention-subtle: light-dark(#fff8c5, #2b2213);
+  --color-done-fg:        light-dark(#8250df, #a371f7);
+  --color-done-subtle:    light-dark(#fbefff, #271044);
+  --font-mono: 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+
+/* Reset */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* Base */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--color-canvas-default);
+  color: var(--color-fg-default);
+}
+
+/* Layout */
+.container { max-width: 1400px; margin: 0 auto; padding: 1.5rem 1rem; }
+
+/* Header */
+.header {
+  border-bottom: 1px solid var(--color-border-default);
+  padding: 1rem 0;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.header h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.header .controls { display: flex; align-items: center; gap: 0.75rem; }
+
+/* Theme toggle */
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--color-fg-muted);
+  font-size: 0.8rem;
+  transition: background 0.15s;
+}
+.theme-toggle:hover { background: var(--color-canvas-subtle); }
+
+/* Input form */
+.input-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.input-group { display: flex; flex-direction: column; gap: 0.35rem; }
+.input-group label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-fg-muted);
+}
+.input-group .label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.input-group .label-input {
+  flex: 1;
+  background: var(--color-canvas-subtle);
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  padding: 3px 8px;
+  color: var(--color-fg-default);
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+.trace-input {
+  width: 100%;
+  min-height: 180px;
+  max-height: 400px;
+  resize: vertical;
+  background: var(--color-canvas-subtle);
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  padding: 0.5rem;
+  color: var(--color-fg-default);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  tab-size: 2;
+}
+.trace-input:focus {
+  outline: none;
+  border-color: var(--color-accent-fg);
+  box-shadow: 0 0 0 3px light-dark(rgba(9,105,218,0.15), rgba(88,166,255,0.15));
+}
+.trace-input.drag-over {
+  border-color: var(--color-accent-fg);
+  background: light-dark(rgba(9,105,218,0.05), rgba(88,166,255,0.05));
+}
+
+.action-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.compare-btn {
+  background: var(--color-accent-fg);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 24px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.compare-btn:hover { opacity: 0.9; }
+.compare-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--color-fg-muted);
+}
+.option-row input[type="checkbox"] { accent-color: var(--color-accent-fg); }
+
+.status-msg {
+  font-size: 0.85rem;
+  color: var(--color-fg-muted);
+}
+.status-msg.error { color: var(--color-danger-fg); }
+
+.drop-hint {
+  font-size: 0.75rem;
+  color: var(--color-fg-subtle);
+  margin-top: 0.15rem;
+}
+
+/* Summary banner */
+.summary-banner {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--color-canvas-subtle);
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.summary-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.summary-stat .label { color: var(--color-fg-muted); }
+.summary-stat .value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.summary-stat .value.matched { color: var(--color-fg-default); }
+.summary-stat .value.inserted { color: var(--color-success-fg); }
+.summary-stat .value.deleted { color: var(--color-danger-fg); }
+.summary-stat .value.modified { color: var(--color-attention-fg); }
+
+/* Insights panel */
+.insights-panel {
+  margin-bottom: 1rem;
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.insights-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 1rem;
+  background: var(--color-canvas-subtle);
+  border-bottom: 1px solid var(--color-border-default);
+  cursor: pointer;
+  user-select: none;
+}
+.insights-header:hover { background: var(--color-canvas-inset); }
+.insights-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.insights-toggle {
+  color: var(--color-fg-subtle);
+  font-size: 0.75rem;
+}
+.insights-body {
+  padding: 0.75rem 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+.insights-body.collapsed { display: none; }
+
+.insight-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.insight-icon {
+  flex-shrink: 0;
+  width: 1.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 3px;
+  padding: 1px 0;
+}
+.insight-icon.deploy { background: var(--color-done-subtle); color: var(--color-done-fg); }
+.insight-icon.error { background: var(--color-danger-subtle); color: var(--color-danger-fg); }
+.insight-icon.perf { background: var(--color-attention-subtle); color: var(--color-attention-fg); }
+.insight-icon.struct { background: var(--color-success-subtle); color: var(--color-success-fg); }
+.insight-icon.http { background: var(--color-accent-fg); color: #fff; }
+.insight-label {
+  color: var(--color-fg-muted);
+  min-width: 5rem;
+}
+.insight-value {
+  color: var(--color-fg-default);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+.insight-value .old { color: var(--color-danger-fg); }
+.insight-value .new { color: var(--color-success-fg); }
+.insight-value .danger { color: var(--color-danger-fg); font-weight: 600; }
+.insight-value .muted { color: var(--color-fg-muted); }
+
+/* Error causal chain */
+.error-chain {
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border-muted);
+}
+.error-chain-title {
+  font-size: 0.75rem;
+  color: var(--color-fg-muted);
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.error-chain-path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+.error-chain-step {
+  padding: 2px 8px;
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-fg);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.error-chain-step .detail {
+  color: var(--color-fg-muted);
+  font-size: 0.75em;
+}
+.error-chain-arrow {
+  color: var(--color-fg-subtle);
+  font-size: 0.7rem;
+}
+.error-chain-cause {
+  margin-top: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--color-danger-fg);
+  padding: 4px 8px;
+  background: var(--color-danger-subtle);
+  border-radius: 4px;
+  border-left: 3px solid var(--color-danger-fg);
+}
+
+/* View tabs */
+.view-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid var(--color-border-default);
+  align-items: center;
+}
+.view-tab {
+  background: none;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  color: var(--color-fg-muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s;
+}
+.view-tab:hover { color: var(--color-fg-default); }
+.view-tab.active {
+  color: var(--color-fg-default);
+  border-bottom-color: var(--color-accent-fg);
+}
+.view-tabs .spacer { flex: 1; }
+.expand-all-btn {
+  background: none;
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  color: var(--color-fg-muted);
+  font-size: 0.75rem;
+  margin-bottom: 2px;
+  transition: background 0.15s;
+}
+.expand-all-btn:hover { background: var(--color-canvas-subtle); color: var(--color-fg-default); }
+
+/* Diff view (unified) */
+.diff-view { font-family: var(--font-mono); font-size: 13px; }
+
+.diff-entry {
+  display: grid;
+  grid-template-columns: 20px 1fr auto auto;
+  gap: 0 0.5rem;
+  align-items: baseline;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: default;
+  min-height: 24px;
+}
+.diff-entry:hover { background: var(--color-canvas-subtle); }
+.diff-entry.expandable { cursor: pointer; }
+
+.diff-entry .marker {
+  font-weight: 700;
+  text-align: center;
+  user-select: none;
+}
+.diff-entry .name-col {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.diff-entry .duration-col {
+  color: var(--color-fg-muted);
+  font-size: 0.8em;
+  text-align: right;
+  white-space: nowrap;
+}
+.diff-entry .status-col {
+  font-size: 0.75em;
+  text-align: center;
+  min-width: 3rem;
+}
+
+/* Diff colors */
+.diff-entry.matched .marker { color: var(--color-fg-subtle); }
+.diff-entry.inserted { background: var(--color-success-subtle); }
+.diff-entry.inserted .marker { color: var(--color-success-fg); }
+.diff-entry.deleted { background: var(--color-danger-subtle); }
+.diff-entry.deleted .marker { color: var(--color-danger-fg); }
+.diff-entry.modified { background: var(--color-attention-subtle); }
+.diff-entry.modified .marker { color: var(--color-attention-fg); }
+.diff-entry.divergence-point {
+  border-left: 3px solid var(--color-done-fg);
+  padding-left: 5px;
+}
+
+/* Duration change arrow */
+.dur-arrow { color: var(--color-fg-subtle); margin: 0 0.15em; }
+.dur-changed { color: var(--color-attention-fg); }
+
+/* Duration delta badge */
+.dur-delta {
+  font-size: 0.7em;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-left: 0.25em;
+  font-weight: 600;
+}
+.dur-delta.slower { color: var(--color-danger-fg); background: var(--color-danger-subtle); }
+.dur-delta.faster { color: var(--color-success-fg); background: var(--color-success-subtle); }
+
+/* Duration heatmap bar */
+.dur-bar-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.dur-bar {
+  display: inline-block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-fg-subtle);
+  opacity: 0.45;
+  min-width: 1px;
+  max-width: 48px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.dur-bar.bar-slower { background: var(--color-danger-fg); opacity: 0.6; }
+.dur-bar.bar-faster { background: var(--color-success-fg); opacity: 0.6; }
+
+/* Service + resource badges */
+.svc-badge {
+  display: inline-block;
+  font-size: 0.7em;
+  color: var(--color-fg-muted);
+  background: var(--color-canvas-subtle);
+  border: 1px solid var(--color-border-muted);
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-left: 0.35em;
+  vertical-align: baseline;
+  max-width: 12em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.res-label {
+  display: inline-block;
+  font-size: 0.75em;
+  color: var(--color-fg-subtle);
+  margin-left: 0.35em;
+  max-width: 18em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+/* Status badges */
+.status-ok { color: var(--color-success-fg); }
+.status-error { color: var(--color-danger-fg); }
+.status-unset { color: var(--color-fg-subtle); }
+
+/* Status transition pill */
+.status-transition {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 0.7em;
+  font-weight: 600;
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-fg);
+  border: 1px solid var(--color-danger-fg);
+}
+.status-transition .arrow { opacity: 0.6; }
+
+/* Indent guide */
+.indent-guide {
+  display: inline-block;
+  width: 16px;
+  height: 100%;
+  border-left: 1px solid var(--color-border-muted);
+  margin-right: 2px;
+}
+
+/* JSON diff popover */
+.diff-toggle {
+  color: var(--color-attention-fg);
+  cursor: pointer;
+  font-size: 0.75em;
+  margin-left: 0.5em;
+  text-decoration: underline dotted;
+  user-select: none;
+}
+.json-diff-panel {
+  display: none;
+  padding: 8px 12px 8px 28px;
+  font-size: 0.8em;
+  color: var(--color-fg-muted);
+  background: var(--color-canvas-subtle);
+  border-radius: 0 0 4px 4px;
+  margin-bottom: 2px;
+}
+.json-diff-panel.open { display: block; }
+.diff-entry + .json-diff-panel { grid-column: 1 / -1; }
+
+/* Categorized diff groups */
+.diff-category { margin-bottom: 0.35rem; }
+.diff-category:last-child { margin-bottom: 0; }
+.diff-category-header {
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: var(--color-fg-subtle);
+  padding-bottom: 2px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.diff-category-header.cat-errors { color: var(--color-danger-fg); }
+.diff-category-header.cat-performance { color: var(--color-attention-fg); }
+.diff-category-header.cat-deployment { color: var(--color-done-fg); }
+.diff-category-header.cat-http { color: var(--color-accent-fg); }
+
+.json-diff-row { padding: 1px 0; }
+.json-diff-row .path { color: var(--color-fg-subtle); }
+.json-diff-row .added { color: var(--color-success-fg); }
+.json-diff-row .removed { color: var(--color-danger-fg); }
+.json-diff-row .old { color: var(--color-danger-fg); }
+.json-diff-row .new { color: var(--color-success-fg); }
+
+/* Aligned split diff */
+.split-diff {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.split-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--color-border-default);
+  background: var(--color-canvas-subtle);
+  font-size: 0.85rem;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.split-header-cell {
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  justify-content: space-between;
+}
+.split-header-cell:first-child { border-right: 1px solid var(--color-border-default); }
+.split-header-cell .dur { color: var(--color-fg-muted); font-weight: 400; }
+
+.split-body { overflow-y: auto; max-height: 80vh; }
+
+.split-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 24px;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.split-row:last-child { border-bottom: none; }
+.split-row:hover .split-cell { background: var(--color-canvas-subtle); }
+.split-row.expandable { cursor: pointer; }
+.split-row.divergence-point { border-left: 3px solid var(--color-done-fg); }
+
+.split-row:hover .split-cell.cell-inserted { background: var(--color-success-subtle); filter: brightness(1.1); }
+.split-row:hover .split-cell.cell-deleted { background: var(--color-danger-subtle); filter: brightness(1.1); }
+.split-row:hover .split-cell.cell-modified { background: var(--color-attention-subtle); filter: brightness(1.1); }
+
+.split-cell {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0 0.5rem;
+  align-items: baseline;
+  padding: 2px 8px;
+  min-height: 24px;
+  transition: background 0.05s;
+}
+.split-cell:first-child { border-right: 1px solid var(--color-border-muted); }
+
+.split-cell .name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.split-cell .dur {
+  color: var(--color-fg-muted);
+  font-size: 0.8em;
+  white-space: nowrap;
+  text-align: right;
+}
+.split-cell .st {
+  font-size: 0.75em;
+  min-width: 2.5rem;
+  text-align: center;
+}
+
+.split-cell.cell-blank { background: var(--color-canvas-inset); }
+.split-cell.cell-inserted { background: var(--color-success-subtle); }
+.split-cell.cell-deleted { background: var(--color-danger-subtle); }
+.split-cell.cell-modified { background: var(--color-attention-subtle); }
+
+.split-json-diff-row {
+  display: none;
+  grid-template-columns: 1fr;
+  padding: 8px 12px 8px 28px;
+  font-size: 0.8em;
+  color: var(--color-fg-muted);
+  background: var(--color-canvas-subtle);
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.split-json-diff-row.open { display: block; }
+
+/* Divergence banner */
+.divergence-banner {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--color-done-subtle);
+  border: 1px solid var(--color-done-fg);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--color-done-fg);
+}
+
+/* Keyboard hint */
+.kbd-hint {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  padding: 4px 10px;
+  background: var(--color-canvas-subtle);
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  font-size: 0.7rem;
+  color: var(--color-fg-subtle);
+  opacity: 0.7;
+}
+kbd {
+  background: var(--color-canvas-inset);
+  border: 1px solid var(--color-border-default);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* Identical badge */
+.identical-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--color-success-subtle);
+  color: var(--color-success-fg);
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-left: 0.5rem;
+}
+
+/* Loading spinner */
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border-default);
+  border-top-color: var(--color-accent-fg);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+  margin-right: 0.35rem;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>trace-diff</h1>
+    <div class="controls">
+      <button class="theme-toggle" id="new-comparison-btn" style="display:none">New comparison</button>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme (t)">theme</button>
+    </div>
+  </div>
+
+  <div class="input-form" id="input-form">
+    <div class="input-group">
+      <div class="label-row">
+        <label for="baseline">Baseline</label>
+        <input class="label-input" type="text" id="baseline-label" value="baseline" placeholder="label">
+      </div>
+      <textarea class="trace-input" id="baseline" placeholder="Paste baseline trace JSON (Datadog UI export or OTLP)&#10;&#10;Or drag & drop a .json file here"></textarea>
+      <div class="drop-hint">Accepts Datadog UI export format</div>
+    </div>
+    <div class="input-group">
+      <div class="label-row">
+        <label for="candidate">Candidate</label>
+        <input class="label-input" type="text" id="candidate-label" value="candidate" placeholder="label">
+      </div>
+      <textarea class="trace-input" id="candidate" placeholder="Paste candidate trace JSON (Datadog UI export or OTLP)&#10;&#10;Or drag & drop a .json file here"></textarea>
+      <div class="drop-hint">Accepts Datadog UI export format</div>
+    </div>
+    <div class="action-row">
+      <button class="compare-btn" id="compare-btn">Compare</button>
+      <div class="option-row">
+        <input type="checkbox" id="include-all">
+        <label for="include-all">Include all fields (no noise filtering)</label>
+      </div>
+      <span class="status-msg" id="status-msg"></span>
+    </div>
+  </div>
+
+  <div id="result"></div>
+</div>
+<div class="kbd-hint"><kbd>t</kbd> theme &middot; <kbd>1</kbd>/<kbd>2</kbd> view &middot; <kbd>e</kbd> expand all</div>
+
+<script>
+var WASM_BASE64 = /*__WASM_BASE64__*/""/*__END__*/;
+
+// WASM glue (from wasm-bindgen, de-ESM-ified for inline use)
+// The build script replaces everything between __WASM_GLUE_START__ and
+// __WASM_GLUE_END__ with the freshly generated & de-ESM-ified glue code.
+/*__WASM_GLUE_START__*/
+var wasmGlue = (function() {
+  'use strict';
+
+  var cachedDataViewMemory0 = null;
+  var cachedUint8ArrayMemory0 = null;
+  var cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+  cachedTextDecoder.decode();
+  var MAX_SAFARI_DECODE_BYTES = 2146435072;
+  var numBytesDecoded = 0;
+  var cachedTextEncoder = new TextEncoder();
+  var WASM_VECTOR_LEN = 0;
+  var wasm = null;
+
+  if (!('encodeInto' in cachedTextEncoder)) {
+    cachedTextEncoder.encodeInto = function(arg, view) {
+      var buf = cachedTextEncoder.encode(arg);
+      view.set(buf);
+      return { read: arg.length, written: buf.length };
+    };
+  }
+
+  function getDataViewMemory0() {
+    if (cachedDataViewMemory0 === null || cachedDataViewMemory0.buffer.detached === true || (cachedDataViewMemory0.buffer.detached === undefined && cachedDataViewMemory0.buffer !== wasm.memory.buffer)) {
+      cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
+    }
+    return cachedDataViewMemory0;
+  }
+
+  function getUint8ArrayMemory0() {
+    if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
+      cachedUint8ArrayMemory0 = new Uint8Array(wasm.memory.buffer);
+    }
+    return cachedUint8ArrayMemory0;
+  }
+
+  function decodeText(ptr, len) {
+    numBytesDecoded += len;
+    if (numBytesDecoded >= MAX_SAFARI_DECODE_BYTES) {
+      cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+      cachedTextDecoder.decode();
+      numBytesDecoded = len;
+    }
+    return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
+  }
+
+  function getStringFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return decodeText(ptr, len);
+  }
+
+  function passStringToWasm0(arg, malloc, realloc) {
+    if (realloc === undefined) {
+      var buf = cachedTextEncoder.encode(arg);
+      var ptr = malloc(buf.length, 1) >>> 0;
+      getUint8ArrayMemory0().subarray(ptr, ptr + buf.length).set(buf);
+      WASM_VECTOR_LEN = buf.length;
+      return ptr;
+    }
+    var len = arg.length;
+    var ptr = malloc(len, 1) >>> 0;
+    var mem = getUint8ArrayMemory0();
+    var offset = 0;
+    for (; offset < len; offset++) {
+      var code = arg.charCodeAt(offset);
+      if (code > 0x7F) break;
+      mem[ptr + offset] = code;
+    }
+    if (offset !== len) {
+      if (offset !== 0) arg = arg.slice(offset);
+      ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
+      var view = getUint8ArrayMemory0().subarray(ptr + offset, ptr + len);
+      var ret = cachedTextEncoder.encodeInto(arg, view);
+      offset += ret.written;
+      ptr = realloc(ptr, len, offset, 1) >>> 0;
+    }
+    WASM_VECTOR_LEN = offset;
+    return ptr;
+  }
+
+  function takeFromExternrefTable0(idx) {
+    var value = wasm.__wbindgen_externrefs.get(idx);
+    wasm.__externref_table_dealloc(idx);
+    return value;
+  }
+
+  function getImports() {
+    var import0 = {
+      __proto__: null,
+      __wbg_error_a6fa202b58aa1cd3: function(arg0, arg1) {
+        var deferred0_0, deferred0_1;
+        try {
+          deferred0_0 = arg0; deferred0_1 = arg1;
+          console.error(getStringFromWasm0(arg0, arg1));
+        } finally {
+          wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
+        }
+      },
+      __wbg_new_227d7c05414eb861: function() { return new Error(); },
+      __wbg_stack_3b0d974bbf31e44f: function(arg0, arg1) {
+        var ret = arg1.stack;
+        var ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
+        getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
+      },
+      __wbindgen_cast_0000000000000001: function(arg0, arg1) {
+        return getStringFromWasm0(arg0, arg1);
+      },
+      __wbindgen_init_externref_table: function() {
+        var table = wasm.__wbindgen_externrefs;
+        var offset = table.grow(4);
+        table.set(0, undefined);
+        table.set(offset + 0, undefined);
+        table.set(offset + 1, null);
+        table.set(offset + 2, true);
+        table.set(offset + 3, false);
+      },
+    };
+    return { __proto__: null, "./trace_diff_bg.js": import0 };
+  }
+
+  // Initialize WASM from an ArrayBuffer.
+  function initSync(bytes) {
+    if (wasm !== null) return;
+    var imports = getImports();
+    var mod = new WebAssembly.Module(bytes);
+    var instance = new WebAssembly.Instance(mod, imports);
+    wasm = instance.exports;
+    cachedDataViewMemory0 = null;
+    cachedUint8ArrayMemory0 = null;
+    wasm.__wbindgen_start();
+  }
+
+  // Call diff_traces on the WASM module.
+  function diff_traces(baseline, candidate, baseline_label, candidate_label, include_all) {
+    var deferred6_0, deferred6_1;
+    try {
+      var ptr0 = passStringToWasm0(baseline, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+      var len0 = WASM_VECTOR_LEN;
+      var ptr1 = passStringToWasm0(candidate, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+      var len1 = WASM_VECTOR_LEN;
+      var ptr2 = passStringToWasm0(baseline_label, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+      var len2 = WASM_VECTOR_LEN;
+      var ptr3 = passStringToWasm0(candidate_label, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+      var len3 = WASM_VECTOR_LEN;
+      var ret = wasm.diff_traces(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3, include_all);
+      var ptr5 = ret[0];
+      var len5 = ret[1];
+      if (ret[3]) {
+        ptr5 = 0; len5 = 0;
+        throw takeFromExternrefTable0(ret[2]);
+      }
+      deferred6_0 = ptr5;
+      deferred6_1 = len5;
+      return getStringFromWasm0(ptr5, len5);
+    } finally {
+      wasm.__wbindgen_free(deferred6_0, deferred6_1, 1);
+    }
+  }
+
+  return { initSync: initSync, diff_traces: diff_traces };
+})();
+/*__WASM_GLUE_END__*/
+
+(function() {
+  'use strict';
+
+  var wasmReady = false;
+  var DATA = null;
+  var resultEl = document.getElementById('result');
+  var currentView = 'sidebyside';
+  var allExpanded = false;
+
+  function ensureWasm() {
+    if (wasmReady) return true;
+    if (!WASM_BASE64) {
+      showStatus('WASM binary not embedded. Run the build script first.', true);
+      return false;
+    }
+    try {
+      var raw = atob(WASM_BASE64);
+      var bytes = new Uint8Array(raw.length);
+      for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      wasmGlue.initSync(bytes.buffer);
+      wasmReady = true;
+      return true;
+    } catch (e) {
+      showStatus('Failed to initialize WASM: ' + e.message, true);
+      return false;
+    }
+  }
+
+  function showStatus(msg, isError) {
+    var el = document.getElementById('status-msg');
+    el.textContent = msg;
+    el.className = 'status-msg' + (isError ? ' error' : '');
+  }
+
+  function setupDragDrop(textareaId) {
+    var ta = document.getElementById(textareaId);
+    ta.addEventListener('dragover', function(ev) {
+      ev.preventDefault();
+      ta.classList.add('drag-over');
+    });
+    ta.addEventListener('dragleave', function() {
+      ta.classList.remove('drag-over');
+    });
+    ta.addEventListener('drop', function(ev) {
+      ev.preventDefault();
+      ta.classList.remove('drag-over');
+      var files = ev.dataTransfer.files;
+      if (files.length > 0) {
+        var reader = new FileReader();
+        reader.onload = function() { ta.value = reader.result; };
+        reader.readAsText(files[0]);
+      }
+    });
+  }
+  setupDragDrop('baseline');
+  setupDragDrop('candidate');
+
+  document.getElementById('compare-btn').addEventListener('click', function() {
+    var baseline = document.getElementById('baseline').value.trim();
+    var candidate = document.getElementById('candidate').value.trim();
+    var baselineLabel = document.getElementById('baseline-label').value.trim() || 'baseline';
+    var candidateLabel = document.getElementById('candidate-label').value.trim() || 'candidate';
+    var includeAll = document.getElementById('include-all').checked;
+
+    if (!baseline || !candidate) {
+      showStatus('Paste both baseline and candidate trace JSON.', true);
+      return;
+    }
+
+    // Guard against oversized input before entering WASM (50 MiB limit).
+    var MAX_INPUT_BYTES = 50 * 1024 * 1024;
+    var totalBytes = baseline.length + candidate.length;
+    if (totalBytes > MAX_INPUT_BYTES) {
+      showStatus('Input too large: ' + (totalBytes / (1024 * 1024)).toFixed(1) + ' MiB exceeds the 50 MiB limit. Try trimming the traces.', true);
+      return;
+    }
+
+    showStatus('Initializing...', false);
+    if (!ensureWasm()) return;
+
+    showStatus('Computing diff...', false);
+    var btn = document.getElementById('compare-btn');
+    btn.disabled = true;
+
+    // Use setTimeout to let the UI update before the potentially heavy WASM call.
+    setTimeout(function() {
+      try {
+        var jsonStr = wasmGlue.diff_traces(baseline, candidate, baselineLabel, candidateLabel, includeAll);
+        DATA = JSON.parse(jsonStr);
+        showStatus('', false);
+        // Collapse the input form, show "New comparison" button.
+        document.getElementById('input-form').style.display = 'none';
+        document.getElementById('new-comparison-btn').style.display = '';
+        render();
+      } catch (e) {
+        showStatus('Error: ' + e, true);
+        resultEl.innerHTML = '';
+      } finally {
+        btn.disabled = false;
+      }
+    }, 10);
+  });
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function fmtDuration(nanos) {
+    if (nanos == null) return '\u2014';
+    if (nanos >= 1e9) return (nanos / 1e9).toFixed(2) + 's';
+    if (nanos >= 1e6) return (nanos / 1e6).toFixed(1) + 'ms';
+    if (nanos >= 1e3) return (nanos / 1e3).toFixed(0) + '\u00b5s';
+    return nanos + 'ns';
+  }
+
+  function indentStr(depth) {
+    var s = '';
+    for (var i = 0; i < depth; i++) s += '<span class="indent-guide"></span>';
+    return s;
+  }
+
+  function statusClass(status) {
+    if (status === 'ok' || status === 'Ok' || status === 'STATUS_CODE_OK') return 'status-ok';
+    if (status === 'error' || status === 'Error' || status === 'STATUS_CODE_ERROR') return 'status-error';
+    return 'status-unset';
+  }
+
+  function extractDuration(json) {
+    if (!json) return null;
+    var start = parseInt(json.startTimeUnixNano || json.start_time_unix_nano, 10);
+    var end = parseInt(json.endTimeUnixNano || json.end_time_unix_nano, 10);
+    if (!isNaN(start) && !isNaN(end)) return end - start;
+    if (typeof json.duration === 'number') return Math.round(json.duration * 1e9);
+    return null;
+  }
+
+  function extractStatus(json) {
+    if (!json) return 'unset';
+    var st = json.status;
+    if (st == null) return 'unset';
+    if (typeof st === 'string') {
+      if (st === 'ok') return 'ok';
+      if (st === 'error') return 'error';
+      return 'unset';
+    }
+    if (typeof st === 'object') {
+      var code = st.code;
+      if (code == null) return 'unset';
+      if (code === 1 || code === 'STATUS_CODE_OK' || code === 'Ok') return 'ok';
+      if (code === 2 || code === 'STATUS_CODE_ERROR' || code === 'Error') return 'error';
+      return 'unset';
+    }
+    return 'unset';
+  }
+
+  function extractService(json) {
+    if (!json) return null;
+    // DD format: top-level "service" field
+    if (typeof json.service === 'string') return json.service;
+    // OTLP format: look in attributes for "service.name"
+    if (Array.isArray(json.attributes)) {
+      for (var i = 0; i < json.attributes.length; i++) {
+        if (json.attributes[i].key === 'service.name') {
+          var v = json.attributes[i].value;
+          if (v && typeof v.stringValue === 'string') return v.stringValue;
+          if (typeof v === 'string') return v;
+        }
+      }
+    }
+    return null;
+  }
+
+  function extractResource(json) {
+    if (!json) return null;
+    // DD format: top-level "resource" field
+    if (typeof json.resource === 'string') return json.resource;
+    // OTLP format: look in attributes for "http.route" or "http.target"
+    if (Array.isArray(json.attributes)) {
+      for (var i = 0; i < json.attributes.length; i++) {
+        var k = json.attributes[i].key;
+        if (k === 'http.route' || k === 'http.target' || k === 'url.path') {
+          var v = json.attributes[i].value;
+          if (v && typeof v.stringValue === 'string') return v.stringValue;
+          if (typeof v === 'string') return v;
+        }
+      }
+    }
+    return null;
+  }
+
+  function renderMetaBadges(json) {
+    var html = '';
+    var svc = extractService(json);
+    var res = extractResource(json);
+    if (svc) html += '<span class="svc-badge">' + esc(svc) + '</span>';
+    if (res) html += '<span class="res-label">' + esc(res) + '</span>';
+    return html;
+  }
+
+  // Pick the "best" meta badges from either side (prefer candidate, fall back to baseline).
+  function metaBadgesForEntry(e) {
+    return renderMetaBadges(e.dst_json || e.src_json);
+  }
+
+  // Render a tiny proportional duration bar.
+  // deltaClass: 'bar-slower' | 'bar-faster' | '' (neutral).
+  function renderDurBar(nanos, maxNanos, deltaClass) {
+    if (nanos == null || maxNanos == null || maxNanos === 0) return '';
+    var pct = Math.max(1, Math.round((nanos / maxNanos) * 100));
+    var width = Math.max(1, Math.round(pct * 48 / 100));
+    var cls = 'dur-bar' + (deltaClass ? ' ' + deltaClass : '');
+    return '<span class="' + cls + '" style="width:' + width + 'px" title="' + fmtDuration(nanos) + '"></span>';
+  }
+
+  // Compute max duration across all entries (both sides).
+  function computeMaxDuration(entries) {
+    var max = 0;
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      var s = extractDuration(e.src_json);
+      var d = extractDuration(e.dst_json);
+      if (s != null && s > max) max = s;
+      if (d != null && d > max) max = d;
+    }
+    return max;
+  }
+
+  function fmtValue(v) {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'string') return '"' + v + '"';
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  }
+
+  function durationDelta(srcNanos, dstNanos) {
+    if (srcNanos == null || dstNanos == null || srcNanos === 0) return null;
+    var pct = ((dstNanos - srcNanos) / srcNanos) * 100;
+    if (Math.abs(pct) < 1) return null;
+    var sign = pct > 0 ? '+' : '';
+    return { pct: pct, label: sign + pct.toFixed(0) + '%' };
+  }
+
+  function durationDeltaHtml(srcNanos, dstNanos) {
+    var d = durationDelta(srcNanos, dstNanos);
+    if (!d) return '';
+    var cls = d.pct > 0 ? 'slower' : 'faster';
+    return '<span class="dur-delta ' + cls + '">' + d.label + '</span>';
+  }
+
+  function categorizeDiff(path) {
+    if (path === 'status' || path.indexOf('meta.error') === 0 || path.indexOf('error') === 0) return 'errors';
+    if (path === 'duration' || path.indexOf('duration') === 0) return 'performance';
+    if (path.indexOf('meta.version') === 0 || path.indexOf('meta.git') === 0) return 'deployment';
+    if (path.indexOf('meta.http') === 0 || path.indexOf('http') === 0) return 'http';
+    return 'other';
+  }
+
+  var categoryLabels = { errors: 'Errors', performance: 'Performance', deployment: 'Deployment', http: 'HTTP', other: 'Other' };
+  var categoryOrder = ['errors', 'performance', 'deployment', 'http', 'other'];
+
+  function computeInsights() {
+    var insights = {
+      versionChange: null, commitChange: null, errorsIntroduced: [], errorTypes: [],
+      errorMessages: [], structuralDeleted: [], structuralInserted: [],
+      durationDelta: null, httpStatusChanges: [], totalFieldDiffs: 0
+    };
+    var entries = DATA.entries;
+    if (entries.length > 0) {
+      var root = entries[0];
+      var srcDur = extractDuration(root.src_json);
+      var dstDur = extractDuration(root.dst_json);
+      if (srcDur != null && dstDur != null && srcDur !== dstDur) {
+        insights.durationDelta = { srcDur: srcDur, dstDur: dstDur, delta: durationDelta(srcDur, dstDur) };
+      }
+    }
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (e.json_diffs) insights.totalFieldDiffs += e.json_diffs.length;
+      if (e.kind === 'deleted') insights.structuralDeleted.push(e.name);
+      if (e.kind === 'inserted') insights.structuralInserted.push(e.name);
+      if (!e.json_diffs) continue;
+      for (var j = 0; j < e.json_diffs.length; j++) {
+        var jd = e.json_diffs[j];
+        var path = jd.path;
+        var change = jd.change;
+        if (path === 'meta.version' && change.type === 'modified' && !insights.versionChange) {
+          insights.versionChange = { old: change.old, new: change.new };
+        }
+        if (path === 'meta.git.commit.sha' && change.type === 'modified' && !insights.commitChange) {
+          var oldSha = typeof change.old === 'string' ? change.old.substring(0, 8) : String(change.old);
+          var newSha = typeof change.new === 'string' ? change.new.substring(0, 8) : String(change.new);
+          insights.commitChange = { old: oldSha, new: newSha };
+        }
+        if (path === 'status' && change.type === 'modified') {
+          if (change.old === 'ok' && change.new === 'error') insights.errorsIntroduced.push(e.name);
+        }
+        if (path === 'meta.error.type' && (change.type === 'added' || change.type === 'modified')) {
+          var errType = change.type === 'added' ? change.value : change.new;
+          if (typeof errType === 'string') {
+            var parts = errType.split('.');
+            var shortName = parts[parts.length - 1];
+            if (insights.errorTypes.indexOf(shortName) === -1) insights.errorTypes.push(shortName);
+          }
+        }
+        if (path === 'meta.error.message' && (change.type === 'added' || change.type === 'modified')) {
+          var msg = change.type === 'added' ? change.value : change.new;
+          if (typeof msg === 'string' && insights.errorMessages.indexOf(msg) === -1) insights.errorMessages.push(msg);
+        }
+        if (path === 'meta.http.status_code' && change.type === 'modified') {
+          insights.httpStatusChanges.push({ span: e.name, old: change.old, new: change.new });
+        }
+      }
+    }
+    return insights;
+  }
+
+  function buildErrorChain() {
+    var entries = DATA.entries;
+    var errorEntries = [];
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (!e.json_diffs) continue;
+      for (var j = 0; j < e.json_diffs.length; j++) {
+        if (e.json_diffs[j].path === 'status' && e.json_diffs[j].change.type === 'modified') {
+          if (e.json_diffs[j].change.old === 'ok' && e.json_diffs[j].change.new === 'error') {
+            errorEntries.push({ index: i, entry: e });
+          }
+        }
+      }
+    }
+    if (errorEntries.length === 0) return null;
+    var deepest = errorEntries[0];
+    for (var i = 1; i < errorEntries.length; i++) {
+      if (errorEntries[i].entry.depth > deepest.entry.depth) deepest = errorEntries[i];
+    }
+    var chain = [];
+    errorEntries.sort(function(a, b) { return b.entry.depth - a.entry.depth; });
+    var seenDepths = {};
+    for (var i = 0; i < errorEntries.length; i++) {
+      var d = errorEntries[i].entry.depth;
+      if (!seenDepths[d]) {
+        seenDepths[d] = true;
+        var detail = '';
+        var ee = errorEntries[i].entry;
+        if (ee.json_diffs) {
+          for (var j = 0; j < ee.json_diffs.length; j++) {
+            var jd = ee.json_diffs[j];
+            if (jd.path === 'meta.http.status_code' && jd.change.type === 'modified') detail = jd.change.old + '\u2192' + jd.change.new;
+            if (jd.path === 'meta.resilience4j.retry.fail_after_max_attempts' && jd.change.type === 'modified') {
+              if (jd.change.new === true || jd.change.new === 'true') detail = 'retry exhausted';
+            }
+          }
+        }
+        chain.push({ name: ee.name, depth: d, detail: detail });
+      }
+    }
+    var rootCause = null;
+    var deepEntry = deepest.entry;
+    if (deepEntry.json_diffs) {
+      for (var j = 0; j < deepEntry.json_diffs.length; j++) {
+        if (deepEntry.json_diffs[j].path === 'meta.error.message') {
+          var ch = deepEntry.json_diffs[j].change;
+          rootCause = ch.type === 'added' ? ch.value : ch.new;
+          break;
+        }
+      }
+    }
+    return { chain: chain, rootCause: rootCause };
+  }
+
+  function renderJsonDiffs(jsonDiffs) {
+    var groups = {};
+    for (var j = 0; j < jsonDiffs.length; j++) {
+      var cat = categorizeDiff(jsonDiffs[j].path);
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(jsonDiffs[j]);
+    }
+    var html = '';
+    var catCount = 0;
+    for (var k in groups) { if (groups.hasOwnProperty(k)) catCount++; }
+    var showHeaders = catCount > 1;
+    for (var ci = 0; ci < categoryOrder.length; ci++) {
+      var cat = categoryOrder[ci];
+      if (!groups[cat]) continue;
+      html += '<div class="diff-category">';
+      if (showHeaders) html += '<div class="diff-category-header cat-' + cat + '">' + categoryLabels[cat] + '</div>';
+      for (var j = 0; j < groups[cat].length; j++) {
+        var jd = groups[cat][j];
+        html += '<div class="json-diff-row"><span class="path">' + esc(jd.path) + ':</span> ';
+        if (jd.change.type === 'added') html += '<span class="added">+ ' + esc(fmtValue(jd.change.value)) + '</span>';
+        else if (jd.change.type === 'removed') html += '<span class="removed">\u2212 ' + esc(fmtValue(jd.change.value)) + '</span>';
+        else if (jd.change.type === 'modified') html += '<span class="old">' + esc(fmtValue(jd.change.old)) + '</span> \u2192 <span class="new">' + esc(fmtValue(jd.change.new)) + '</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    return html;
+  }
+
+  function renderStatusTransition(srcStatus, dstStatus) {
+    if (srcStatus === dstStatus) return '';
+    if (srcStatus === 'ok' && dstStatus === 'error') return '<span class="status-transition">ok <span class="arrow">\u2192</span> error</span>';
+    if (srcStatus === 'error' && dstStatus === 'ok') return '<span class="status-transition" style="background:var(--color-success-subtle);color:var(--color-success-fg);border-color:var(--color-success-fg)">error <span class="arrow">\u2192</span> ok</span>';
+    return '<span class="status-transition" style="background:var(--color-attention-subtle);color:var(--color-attention-fg);border-color:var(--color-attention-fg)">' + esc(srcStatus) + ' <span class="arrow">\u2192</span> ' + esc(dstStatus) + '</span>';
+  }
+
+  var newCompBtn = document.getElementById('new-comparison-btn');
+  newCompBtn.addEventListener('click', function() {
+    DATA = null;
+    resultEl.innerHTML = '';
+    document.getElementById('input-form').style.display = '';
+    document.getElementById('baseline').value = '';
+    document.getElementById('candidate').value = '';
+    newCompBtn.style.display = 'none';
+    showStatus('', false);
+  });
+
+  function renderSummary() {
+    var s = DATA.summary;
+    var rootEntry = DATA.entries.length > 0 ? DATA.entries[0] : null;
+    var srcDur = rootEntry ? extractDuration(rootEntry.src_json) : null;
+    var dstDur = rootEntry ? extractDuration(rootEntry.dst_json) : null;
+    var totalFieldDiffs = 0;
+    for (var i = 0; i < DATA.entries.length; i++) {
+      if (DATA.entries[i].json_diffs) totalFieldDiffs += DATA.entries[i].json_diffs.length;
+    }
+    var html = '<div class="summary-banner">';
+    html += '<div class="summary-stat"><span class="label">baseline:</span> <span class="value">' + esc(DATA.baseline_label) + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">candidate:</span> <span class="value">' + esc(DATA.candidate_label) + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">spans:</span> <span class="value">' + s.src_span_count + ' \u2192 ' + s.dst_span_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">matched:</span> <span class="value matched">' + s.matched_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">inserted:</span> <span class="value inserted">+' + s.inserted_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">deleted:</span> <span class="value deleted">\u2212' + s.deleted_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">modified:</span> <span class="value modified">' + s.modified_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">field diffs:</span> <span class="value">' + totalFieldDiffs + '</span></div>';
+    if (srcDur != null || dstDur != null) {
+      var durHtml = fmtDuration(srcDur) + ' \u2192 ' + fmtDuration(dstDur);
+      if (srcDur != null && dstDur != null) durHtml += durationDeltaHtml(srcDur, dstDur);
+      html += '<div class="summary-stat"><span class="label">time:</span> <span class="value">' + durHtml + '</span></div>';
+    }
+    if (s.inserted_count === 0 && s.deleted_count === 0 && s.modified_count === 0) html += '<span class="identical-badge">identical</span>';
+    html += '</div>';
+    return html;
+  }
+
+  function renderInsights() {
+    var ins = computeInsights();
+    var hasInsights = ins.versionChange || ins.commitChange || ins.errorsIntroduced.length > 0 || ins.structuralDeleted.length > 0 || ins.structuralInserted.length > 0 || ins.durationDelta || ins.httpStatusChanges.length > 0;
+    if (!hasInsights) return '';
+    var html = '<div class="insights-panel"><div class="insights-header" id="insights-toggle"><span class="insights-title">What Changed</span><span class="insights-toggle" id="insights-toggle-label">collapse</span></div><div class="insights-body" id="insights-body">';
+    if (ins.versionChange) {
+      html += '<div class="insight-row"><span class="insight-icon deploy">D</span><span class="insight-label">version</span><span class="insight-value"><span class="old">' + esc(fmtValue(ins.versionChange.old)) + '</span> \u2192 <span class="new">' + esc(fmtValue(ins.versionChange.new)) + '</span></span></div>';
+    }
+    if (ins.commitChange) {
+      html += '<div class="insight-row"><span class="insight-icon deploy">D</span><span class="insight-label">commit</span><span class="insight-value"><span class="old">' + esc(ins.commitChange.old) + '</span> \u2192 <span class="new">' + esc(ins.commitChange.new) + '</span></span></div>';
+    }
+    if (ins.errorsIntroduced.length > 0) {
+      html += '<div class="insight-row"><span class="insight-icon error">E</span><span class="insight-label">errors</span><span class="insight-value"><span class="danger">' + ins.errorsIntroduced.length + ' span' + (ins.errorsIntroduced.length > 1 ? 's' : '') + ' went ok \u2192 error</span>';
+      if (ins.errorTypes.length > 0) html += ' <span class="muted">\u2014 ' + esc(ins.errorTypes.join(', ')) + '</span>';
+      html += '</span></div>';
+    }
+    for (var i = 0; i < ins.errorMessages.length; i++) {
+      html += '<div class="insight-row"><span class="insight-icon error">E</span><span class="insight-label">message</span><span class="insight-value" style="color:var(--color-danger-fg)">' + esc(ins.errorMessages[i]) + '</span></div>';
+    }
+    if (ins.durationDelta) {
+      var dd = ins.durationDelta;
+      html += '<div class="insight-row"><span class="insight-icon perf">P</span><span class="insight-label">duration</span><span class="insight-value">' + fmtDuration(dd.srcDur) + ' \u2192 ' + fmtDuration(dd.dstDur);
+      if (dd.delta) { var cls = dd.delta.pct > 0 ? 'slower' : 'faster'; html += ' <span class="dur-delta ' + cls + '">' + dd.delta.label + '</span>'; }
+      html += '</span></div>';
+    }
+    for (var i = 0; i < ins.httpStatusChanges.length; i++) {
+      var hc = ins.httpStatusChanges[i];
+      html += '<div class="insight-row"><span class="insight-icon http">H</span><span class="insight-label">' + esc(hc.span) + '</span><span class="insight-value"><span class="old">' + esc(String(hc.old)) + '</span> \u2192 <span class="new">' + esc(String(hc.new)) + '</span></span></div>';
+    }
+    if (ins.structuralDeleted.length > 0) {
+      html += '<div class="insight-row"><span class="insight-icon struct">S</span><span class="insight-label">deleted</span><span class="insight-value">' + ins.structuralDeleted.length + ' span' + (ins.structuralDeleted.length > 1 ? 's' : '') + ': ' + ins.structuralDeleted.map(function(n) { return '<span class="old">' + esc(n) + '</span>'; }).join(', ') + '</span></div>';
+    }
+    if (ins.structuralInserted.length > 0) {
+      html += '<div class="insight-row"><span class="insight-icon struct">S</span><span class="insight-label">inserted</span><span class="insight-value">' + ins.structuralInserted.length + ' span' + (ins.structuralInserted.length > 1 ? 's' : '') + ': ' + ins.structuralInserted.map(function(n) { return '<span class="new">' + esc(n) + '</span>'; }).join(', ') + '</span></div>';
+    }
+    var errorChain = buildErrorChain();
+    if (errorChain) {
+      html += '<div class="error-chain"><div class="error-chain-title">Error Propagation</div><div class="error-chain-path">';
+      for (var i = 0; i < errorChain.chain.length; i++) {
+        if (i > 0) html += '<span class="error-chain-arrow">\u2192</span>';
+        var step = errorChain.chain[i];
+        html += '<span class="error-chain-step">' + esc(step.name);
+        if (step.detail) html += ' <span class="detail">(' + esc(step.detail) + ')</span>';
+        html += '</span>';
+      }
+      html += '</div>';
+      if (errorChain.rootCause) html += '<div class="error-chain-cause">' + esc(errorChain.rootCause) + '</div>';
+      html += '</div>';
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function renderDivergence() {
+    if (DATA.divergence_index == null) return '';
+    var entry = DATA.entries[DATA.divergence_index];
+    return '<div class="divergence-banner">Divergence at depth ' + entry.depth + ': <strong>' + esc(entry.name) + '</strong> \u2014 children differ between baseline and candidate.</div>';
+  }
+
+  function renderViewTabs() {
+    return '<div class="view-tabs">' +
+      '<button class="view-tab' + (currentView === 'sidebyside' ? ' active' : '') + '" data-view="sidebyside">Split diff</button>' +
+      '<button class="view-tab' + (currentView === 'unified' ? ' active' : '') + '" data-view="unified">Unified</button>' +
+      '<span class="spacer"></span>' +
+      '<button class="expand-all-btn" id="expand-all-btn">' + (allExpanded ? 'Collapse all' : 'Expand all') + '</button>' +
+    '</div>';
+  }
+
+  function renderUnified() {
+    var entries = DATA.entries;
+    var maxDur = computeMaxDuration(entries);
+    var html = '<div class="diff-view">';
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      var kind = e.kind;
+      var hasDiffs = e.json_diffs && e.json_diffs.length > 0;
+      var cls = kind;
+      if (kind === 'matched' && hasDiffs) cls = 'modified';
+      if (DATA.divergence_index != null && i === DATA.divergence_index) cls += ' divergence-point';
+      if (hasDiffs) cls += ' expandable';
+      var marker = kind === 'inserted' ? '+' : kind === 'deleted' ? '\u2212' : hasDiffs ? '~' : ' ';
+      var rawJson = e.dst_json || e.src_json;
+      var statusHtml = '';
+      if (e.side === 'both') {
+        var srcStatus = extractStatus(e.src_json);
+        var dstStatus = extractStatus(e.dst_json);
+        var transition = renderStatusTransition(srcStatus, dstStatus);
+        statusHtml = transition || '<span class="' + statusClass(dstStatus) + '">' + esc(dstStatus) + '</span>';
+      } else {
+        var status = extractStatus(rawJson);
+        statusHtml = '<span class="' + statusClass(status) + '">' + esc(status) + '</span>';
+      }
+      var durHtml;
+      var barHtml = '';
+      if (e.side === 'both') {
+        var srcDur = extractDuration(e.src_json);
+        var dstDur = extractDuration(e.dst_json);
+        if (srcDur != null && dstDur != null && srcDur !== dstDur) {
+          var delta = durationDelta(srcDur, dstDur);
+          var barCls = delta ? (delta.pct > 5 ? 'bar-slower' : delta.pct < -5 ? 'bar-faster' : '') : '';
+          barHtml = renderDurBar(dstDur, maxDur, barCls);
+          durHtml = '<span class="dur-changed">' + fmtDuration(srcDur) + '</span><span class="dur-arrow">\u2192</span><span class="dur-changed">' + fmtDuration(dstDur) + '</span>' + durationDeltaHtml(srcDur, dstDur);
+        } else {
+          var showDur = dstDur != null ? dstDur : srcDur;
+          barHtml = renderDurBar(showDur, maxDur, '');
+          durHtml = fmtDuration(showDur);
+        }
+      } else {
+        var rawDur = extractDuration(rawJson);
+        barHtml = renderDurBar(rawDur, maxDur, '');
+        durHtml = fmtDuration(rawDur);
+      }
+      html += '<div class="diff-entry ' + cls + '"' + (hasDiffs ? ' data-toggle-idx="' + i + '"' : '') + '>';
+      html += '<span class="marker">' + marker + '</span>';
+      html += '<span class="name-col">' + indentStr(e.depth) + esc(e.name) + metaBadgesForEntry(e);
+      if (hasDiffs) html += ' <span class="diff-toggle" data-idx="' + i + '">(' + e.json_diffs.length + ' change' + (e.json_diffs.length > 1 ? 's' : '') + ')</span>';
+      html += '</span>';
+      html += '<span class="duration-col"><span class="dur-bar-wrap">' + barHtml + '</span>' + durHtml + '</span>';
+      html += '<span class="status-col">' + statusHtml + '</span>';
+      html += '</div>';
+      if (hasDiffs) {
+        html += '<div class="json-diff-panel' + (allExpanded ? ' open' : '') + '" id="diff-panel-' + i + '">';
+        html += renderJsonDiffs(e.json_diffs);
+        html += '</div>';
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderSideBySide() {
+    var entries = DATA.entries;
+    var maxDur = computeMaxDuration(entries);
+    var rootEntry = entries.length > 0 ? entries[0] : null;
+    var srcRootDur = rootEntry ? extractDuration(rootEntry.src_json) : null;
+    var dstRootDur = rootEntry ? extractDuration(rootEntry.dst_json) : null;
+    var rootDeltaHtml = durationDeltaHtml(srcRootDur, dstRootDur);
+    var html = '<div class="split-diff"><div class="split-header">';
+    html += '<div class="split-header-cell"><span>' + esc(DATA.baseline_label) + '</span><span class="dur">' + fmtDuration(srcRootDur) + '</span></div>';
+    html += '<div class="split-header-cell"><span>' + esc(DATA.candidate_label) + '</span><span class="dur">' + fmtDuration(dstRootDur) + rootDeltaHtml + '</span></div>';
+    html += '</div><div class="split-body">';
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      var kind = e.kind;
+      var hasDiffs = e.json_diffs && e.json_diffs.length > 0;
+      var rowCls = '';
+      if (DATA.divergence_index != null && i === DATA.divergence_index) rowCls += ' divergence-point';
+      if (hasDiffs) rowCls += ' expandable';
+      html += '<div class="split-row' + rowCls + '"' + (hasDiffs ? ' data-toggle-idx="' + i + '"' : '') + '>';
+      if (kind === 'matched') {
+        var cellCls = hasDiffs ? ' cell-modified' : '';
+        var srcDur = extractDuration(e.src_json);
+        var dstDur = extractDuration(e.dst_json);
+        var srcStatus = extractStatus(e.src_json);
+        var dstStatus = extractStatus(e.dst_json);
+        var deltaHtml = durationDeltaHtml(srcDur, dstDur);
+        var delta = durationDelta(srcDur, dstDur);
+        var dstBarCls = delta ? (delta.pct > 5 ? 'bar-slower' : delta.pct < -5 ? 'bar-faster' : '') : '';
+        var srcStatusHtml = '<span class="' + statusClass(srcStatus) + '">' + esc(srcStatus) + '</span>';
+        var transition = renderStatusTransition(srcStatus, dstStatus);
+        var dstStatusHtml = transition || '<span class="' + statusClass(dstStatus) + '">' + esc(dstStatus) + '</span>';
+        html += '<div class="split-cell' + cellCls + '"><span class="name">' + indentStr(e.depth) + esc(e.name) + renderMetaBadges(e.src_json);
+        if (hasDiffs) html += ' <span class="diff-toggle" data-idx="' + i + '">~' + e.json_diffs.length + '</span>';
+        html += '</span><span class="dur"><span class="dur-bar-wrap">' + renderDurBar(srcDur, maxDur, '') + '</span>' + fmtDuration(srcDur) + '</span><span class="st">' + srcStatusHtml + '</span></div>';
+        html += '<div class="split-cell' + cellCls + '"><span class="name">' + indentStr(e.depth) + esc(e.name) + renderMetaBadges(e.dst_json);
+        if (hasDiffs) html += ' <span class="diff-toggle" data-idx="' + i + '">~' + e.json_diffs.length + '</span>';
+        html += '</span><span class="dur"><span class="dur-bar-wrap">' + renderDurBar(dstDur, maxDur, dstBarCls) + '</span>' + fmtDuration(dstDur) + deltaHtml + '</span><span class="st">' + dstStatusHtml + '</span></div>';
+      } else if (kind === 'deleted') {
+        var delDur = extractDuration(e.src_json);
+        var delStatus = extractStatus(e.src_json);
+        html += '<div class="split-cell cell-deleted"><span class="name">' + indentStr(e.depth) + '<span style="color:var(--color-danger-fg)">\u2212 ' + esc(e.name) + '</span>' + renderMetaBadges(e.src_json) + '</span><span class="dur"><span class="dur-bar-wrap">' + renderDurBar(delDur, maxDur, '') + '</span>' + fmtDuration(delDur) + '</span><span class="st ' + statusClass(delStatus) + '">' + esc(delStatus) + '</span></div>';
+        html += '<div class="split-cell cell-blank"></div>';
+      } else if (kind === 'inserted') {
+        html += '<div class="split-cell cell-blank"></div>';
+        var insDur = extractDuration(e.dst_json);
+        var insStatus = extractStatus(e.dst_json);
+        html += '<div class="split-cell cell-inserted"><span class="name">' + indentStr(e.depth) + '<span style="color:var(--color-success-fg)">+ ' + esc(e.name) + '</span>' + renderMetaBadges(e.dst_json) + '</span><span class="dur"><span class="dur-bar-wrap">' + renderDurBar(insDur, maxDur, '') + '</span>' + fmtDuration(insDur) + '</span><span class="st ' + statusClass(insStatus) + '">' + esc(insStatus) + '</span></div>';
+      }
+      html += '</div>';
+      if (hasDiffs) {
+        html += '<div class="split-json-diff-row' + (allExpanded ? ' open' : '') + '" id="diff-panel-' + i + '">';
+        html += renderJsonDiffs(e.json_diffs);
+        html += '</div>';
+      }
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function render() {
+    if (!DATA) return;
+    var html = renderSummary();
+    html += renderInsights();
+    html += renderDivergence();
+    html += renderViewTabs();
+    if (currentView === 'unified') html += renderUnified();
+    else html += renderSideBySide();
+    resultEl.innerHTML = html;
+    bindEvents();
+  }
+
+  function bindEvents() {
+    var tabs = document.querySelectorAll('.view-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].addEventListener('click', function() {
+        currentView = this.getAttribute('data-view');
+        render();
+      });
+    }
+    var toggles = document.querySelectorAll('.diff-toggle');
+    for (var i = 0; i < toggles.length; i++) {
+      toggles[i].addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var idx = this.getAttribute('data-idx');
+        var panel = document.getElementById('diff-panel-' + idx);
+        if (panel) panel.classList.toggle('open');
+      });
+    }
+    var expandableRows = document.querySelectorAll('[data-toggle-idx]');
+    for (var i = 0; i < expandableRows.length; i++) {
+      expandableRows[i].addEventListener('click', function(ev) {
+        if (ev.target.classList.contains('diff-toggle')) return;
+        var idx = this.getAttribute('data-toggle-idx');
+        var panel = document.getElementById('diff-panel-' + idx);
+        if (panel) panel.classList.toggle('open');
+      });
+    }
+    var expandBtn = document.getElementById('expand-all-btn');
+    if (expandBtn) expandBtn.addEventListener('click', function() { allExpanded = !allExpanded; render(); });
+    var insightsToggle = document.getElementById('insights-toggle');
+    if (insightsToggle) {
+      insightsToggle.addEventListener('click', function() {
+        var body = document.getElementById('insights-body');
+        var label = document.getElementById('insights-toggle-label');
+        if (body) {
+          body.classList.toggle('collapsed');
+          if (label) label.textContent = body.classList.contains('collapsed') ? 'expand' : 'collapse';
+        }
+      });
+    }
+  }
+
+  document.addEventListener('keydown', function(ev) {
+    if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA') return;
+    if (ev.key === 't') toggleTheme();
+    if (!DATA) return;
+    if (ev.key === '1') { currentView = 'sidebyside'; render(); }
+    if (ev.key === '2') { currentView = 'unified'; render(); }
+    if (ev.key === 'e') { allExpanded = !allExpanded; render(); }
+  });
+})();
+
+function toggleTheme() {
+  var html = document.documentElement;
+  var current = html.style.colorScheme;
+  html.style.colorScheme = current === 'light' ? 'dark' : 'light';
+}
+</script>
+</body>
+</html>

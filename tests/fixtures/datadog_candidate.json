@@ -1,0 +1,67 @@
+{
+  "trace": {
+    "root_id": "500",
+    "spans": {
+      "500": {
+        "trace_id": "888",
+        "span_id": "500",
+        "parent_id": "0",
+        "start": 1772724000.100,
+        "end": 1772724000.130,
+        "duration": 0.030,
+        "status": "ok",
+        "type": "web",
+        "service": "my-service",
+        "name": "spring.handler",
+        "resource": "UsersController.create",
+        "resource_hash": "abc123",
+        "meta": { "http.method": "POST", "http.url": "/users" },
+        "metrics": { "_dd.measured": 1 },
+        "hostname": "host-2",
+        "env": "production",
+        "children_ids": ["600", "700"]
+      },
+      "600": {
+        "trace_id": "888",
+        "span_id": "600",
+        "parent_id": "500",
+        "start": 1772724000.101,
+        "end": 1772724000.115,
+        "duration": 0.014,
+        "status": "ok",
+        "type": "http",
+        "service": "my-service",
+        "name": "http.request",
+        "resource": "GET /api/users",
+        "resource_hash": "def456",
+        "meta": { "http.status_code": "200" },
+        "metrics": {},
+        "hostname": "host-2",
+        "env": "production",
+        "children_ids": []
+      },
+      "700": {
+        "trace_id": "888",
+        "span_id": "700",
+        "parent_id": "500",
+        "start": 1772724000.116,
+        "end": 1772724000.125,
+        "duration": 0.009,
+        "status": "ok",
+        "type": "sql",
+        "service": "my-service",
+        "name": "pg.query",
+        "resource": "SELECT * FROM users WHERE id = ?",
+        "resource_hash": "jkl012",
+        "meta": { "db.type": "postgresql" },
+        "metrics": {},
+        "hostname": "host-2",
+        "env": "production",
+        "children_ids": []
+      }
+    }
+  },
+  "is_truncated": false,
+  "is_summary": false,
+  "retention_reason": "diversity-sampling"
+}

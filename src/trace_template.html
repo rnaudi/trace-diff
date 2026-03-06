@@ -1,0 +1,1304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Erosion — Trace Diff</title>
+<style>
+/* Design tokens (GitHub Primer, dark default) */
+:root {
+  color-scheme: dark light;
+  --color-canvas-default: light-dark(#ffffff, #0d1117);
+  --color-canvas-subtle:  light-dark(#f6f8fa, #161b22);
+  --color-canvas-inset:   light-dark(#eff2f5, #010409);
+  --color-border-default: light-dark(#d0d7de, #30363d);
+  --color-border-muted:   light-dark(#d8dee4, #21262d);
+  --color-fg-default:     light-dark(#1f2328, #e6edf3);
+  --color-fg-muted:       light-dark(#656d76, #8b949e);
+  --color-fg-subtle:      light-dark(#6e7781, #484f58);
+  --color-accent-fg:      light-dark(#0969da, #58a6ff);
+  --color-success-fg:     light-dark(#1a7f37, #3fb950);
+  --color-success-subtle: light-dark(#dafbe1, #0d2818);
+  --color-danger-fg:      light-dark(#cf222e, #f85149);
+  --color-danger-subtle:  light-dark(#ffebe9, #2d1013);
+  --color-attention-fg:   light-dark(#9a6700, #d29922);
+  --color-attention-subtle: light-dark(#fff8c5, #2b2213);
+  --color-done-fg:        light-dark(#8250df, #a371f7);
+  --color-done-subtle:    light-dark(#fbefff, #271044);
+  --font-mono: 'SFMono-Regular', Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+
+/* Reset */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* Base */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--color-canvas-default);
+  color: var(--color-fg-default);
+}
+
+/* Layout */
+.container { max-width: 1400px; margin: 0 auto; padding: 1.5rem 1rem; }
+
+/* Header */
+.header {
+  border-bottom: 1px solid var(--color-border-default);
+  padding: 1rem 0;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.header h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.header .controls { display: flex; align-items: center; gap: 0.75rem; }
+
+/* Theme toggle */
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--color-fg-muted);
+  font-size: 0.8rem;
+  transition: background 0.15s;
+}
+.theme-toggle:hover { background: var(--color-canvas-subtle); }
+
+/* Summary banner */
+.summary-banner {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--color-canvas-subtle);
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+.summary-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.summary-stat .label { color: var(--color-fg-muted); }
+.summary-stat .value { font-weight: 600; font-variant-numeric: tabular-nums; }
+.summary-stat .value.matched { color: var(--color-fg-default); }
+.summary-stat .value.inserted { color: var(--color-success-fg); }
+.summary-stat .value.deleted { color: var(--color-danger-fg); }
+.summary-stat .value.modified { color: var(--color-attention-fg); }
+
+/* Insights panel */
+.insights-panel {
+  margin-bottom: 1rem;
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.insights-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 1rem;
+  background: var(--color-canvas-subtle);
+  border-bottom: 1px solid var(--color-border-default);
+  cursor: pointer;
+  user-select: none;
+}
+.insights-header:hover { background: var(--color-canvas-inset); }
+.insights-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.insights-toggle {
+  color: var(--color-fg-subtle);
+  font-size: 0.75rem;
+}
+.insights-body {
+  padding: 0.75rem 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+.insights-body.collapsed { display: none; }
+
+.insight-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+.insight-icon {
+  flex-shrink: 0;
+  width: 1.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 3px;
+  padding: 1px 0;
+}
+.insight-icon.deploy { background: var(--color-done-subtle); color: var(--color-done-fg); }
+.insight-icon.error { background: var(--color-danger-subtle); color: var(--color-danger-fg); }
+.insight-icon.perf { background: var(--color-attention-subtle); color: var(--color-attention-fg); }
+.insight-icon.struct { background: var(--color-success-subtle); color: var(--color-success-fg); }
+.insight-icon.http { background: var(--color-accent-fg); color: #fff; }
+.insight-label {
+  color: var(--color-fg-muted);
+  min-width: 5rem;
+}
+.insight-value {
+  color: var(--color-fg-default);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+.insight-value .old { color: var(--color-danger-fg); }
+.insight-value .new { color: var(--color-success-fg); }
+.insight-value .danger { color: var(--color-danger-fg); font-weight: 600; }
+.insight-value .muted { color: var(--color-fg-muted); }
+
+/* Error causal chain */
+.error-chain {
+  margin-top: 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--color-border-muted);
+}
+.error-chain-title {
+  font-size: 0.75rem;
+  color: var(--color-fg-muted);
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.error-chain-path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+}
+.error-chain-step {
+  padding: 2px 8px;
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-fg);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.error-chain-step .detail {
+  color: var(--color-fg-muted);
+  font-size: 0.75em;
+}
+.error-chain-arrow {
+  color: var(--color-fg-subtle);
+  font-size: 0.7rem;
+}
+.error-chain-cause {
+  margin-top: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--color-danger-fg);
+  padding: 4px 8px;
+  background: var(--color-danger-subtle);
+  border-radius: 4px;
+  border-left: 3px solid var(--color-danger-fg);
+}
+
+/* View tabs */
+.view-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid var(--color-border-default);
+  align-items: center;
+}
+.view-tab {
+  background: none;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  color: var(--color-fg-muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s;
+}
+.view-tab:hover { color: var(--color-fg-default); }
+.view-tab.active {
+  color: var(--color-fg-default);
+  border-bottom-color: var(--color-accent-fg);
+}
+.view-tabs .spacer { flex: 1; }
+.expand-all-btn {
+  background: none;
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  color: var(--color-fg-muted);
+  font-size: 0.75rem;
+  margin-bottom: 2px;
+  transition: background 0.15s;
+}
+.expand-all-btn:hover { background: var(--color-canvas-subtle); color: var(--color-fg-default); }
+
+/* Diff view (unified) */
+.diff-view { font-family: var(--font-mono); font-size: 13px; }
+
+.diff-entry {
+  display: grid;
+  grid-template-columns: 20px 1fr auto auto;
+  gap: 0 0.5rem;
+  align-items: baseline;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: default;
+  min-height: 24px;
+}
+.diff-entry:hover { background: var(--color-canvas-subtle); }
+.diff-entry.expandable { cursor: pointer; }
+
+.diff-entry .marker {
+  font-weight: 700;
+  text-align: center;
+  user-select: none;
+}
+.diff-entry .name-col {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.diff-entry .duration-col {
+  color: var(--color-fg-muted);
+  font-size: 0.8em;
+  text-align: right;
+  white-space: nowrap;
+}
+.diff-entry .status-col {
+  font-size: 0.75em;
+  text-align: center;
+  min-width: 3rem;
+}
+
+/* Diff colors */
+.diff-entry.matched .marker { color: var(--color-fg-subtle); }
+.diff-entry.inserted { background: var(--color-success-subtle); }
+.diff-entry.inserted .marker { color: var(--color-success-fg); }
+.diff-entry.deleted { background: var(--color-danger-subtle); }
+.diff-entry.deleted .marker { color: var(--color-danger-fg); }
+.diff-entry.modified { background: var(--color-attention-subtle); }
+.diff-entry.modified .marker { color: var(--color-attention-fg); }
+.diff-entry.divergence-point {
+  border-left: 3px solid var(--color-done-fg);
+  padding-left: 5px;
+}
+
+/* Duration change arrow */
+.dur-arrow { color: var(--color-fg-subtle); margin: 0 0.15em; }
+.dur-changed { color: var(--color-attention-fg); }
+
+/* Duration delta badge */
+.dur-delta {
+  font-size: 0.7em;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-left: 0.25em;
+  font-weight: 600;
+}
+.dur-delta.slower { color: var(--color-danger-fg); background: var(--color-danger-subtle); }
+.dur-delta.faster { color: var(--color-success-fg); background: var(--color-success-subtle); }
+
+/* Status badges */
+.status-ok { color: var(--color-success-fg); }
+.status-error { color: var(--color-danger-fg); }
+.status-unset { color: var(--color-fg-subtle); }
+
+/* Status transition pill */
+.status-transition {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2em;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 0.7em;
+  font-weight: 600;
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-fg);
+  border: 1px solid var(--color-danger-fg);
+}
+.status-transition .arrow { opacity: 0.6; }
+
+/* Indent guide: subtle left border per depth */
+.indent-guide {
+  display: inline-block;
+  width: 16px;
+  height: 100%;
+  border-left: 1px solid var(--color-border-muted);
+  margin-right: 2px;
+}
+
+/* JSON diff popover */
+.diff-toggle {
+  color: var(--color-attention-fg);
+  cursor: pointer;
+  font-size: 0.75em;
+  margin-left: 0.5em;
+  text-decoration: underline dotted;
+  user-select: none;
+}
+.json-diff-panel {
+  display: none;
+  padding: 8px 12px 8px 28px;
+  font-size: 0.8em;
+  color: var(--color-fg-muted);
+  background: var(--color-canvas-subtle);
+  border-radius: 0 0 4px 4px;
+  margin-bottom: 2px;
+}
+.json-diff-panel.open { display: block; }
+/* In unified view, span full grid width */
+.diff-entry + .json-diff-panel { grid-column: 1 / -1; }
+
+/* Categorized diff groups */
+.diff-category {
+  margin-bottom: 0.35rem;
+}
+.diff-category:last-child { margin-bottom: 0; }
+.diff-category-header {
+  font-size: 0.7em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: var(--color-fg-subtle);
+  padding-bottom: 2px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.diff-category-header.cat-errors { color: var(--color-danger-fg); }
+.diff-category-header.cat-performance { color: var(--color-attention-fg); }
+.diff-category-header.cat-deployment { color: var(--color-done-fg); }
+.diff-category-header.cat-http { color: var(--color-accent-fg); }
+
+.json-diff-row { padding: 1px 0; }
+.json-diff-row .path { color: var(--color-fg-subtle); }
+.json-diff-row .added { color: var(--color-success-fg); }
+.json-diff-row .removed { color: var(--color-danger-fg); }
+.json-diff-row .old { color: var(--color-danger-fg); }
+.json-diff-row .new { color: var(--color-success-fg); }
+
+/* Aligned split diff */
+.split-diff {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.split-header {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--color-border-default);
+  background: var(--color-canvas-subtle);
+  font-size: 0.85rem;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.split-header-cell {
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  justify-content: space-between;
+}
+.split-header-cell:first-child { border-right: 1px solid var(--color-border-default); }
+.split-header-cell .dur { color: var(--color-fg-muted); font-weight: 400; }
+
+.split-body { overflow-y: auto; max-height: 80vh; }
+
+.split-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 24px;
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.split-row:last-child { border-bottom: none; }
+.split-row:hover .split-cell { background: var(--color-canvas-subtle); }
+.split-row.expandable { cursor: pointer; }
+.split-row.divergence-point { border-left: 3px solid var(--color-done-fg); }
+
+/* Override hover for colored cells */
+.split-row:hover .split-cell.cell-inserted { background: var(--color-success-subtle); filter: brightness(1.1); }
+.split-row:hover .split-cell.cell-deleted { background: var(--color-danger-subtle); filter: brightness(1.1); }
+.split-row:hover .split-cell.cell-modified { background: var(--color-attention-subtle); filter: brightness(1.1); }
+
+.split-cell {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0 0.5rem;
+  align-items: baseline;
+  padding: 2px 8px;
+  min-height: 24px;
+  transition: background 0.05s;
+}
+.split-cell:first-child { border-right: 1px solid var(--color-border-muted); }
+
+.split-cell .name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.split-cell .dur {
+  color: var(--color-fg-muted);
+  font-size: 0.8em;
+  white-space: nowrap;
+  text-align: right;
+}
+.split-cell .st {
+  font-size: 0.75em;
+  min-width: 2.5rem;
+  text-align: center;
+}
+
+/* Split cell coloring */
+.split-cell.cell-blank {
+  background: var(--color-canvas-inset);
+}
+.split-cell.cell-inserted {
+  background: var(--color-success-subtle);
+}
+.split-cell.cell-deleted {
+  background: var(--color-danger-subtle);
+}
+.split-cell.cell-modified {
+  background: var(--color-attention-subtle);
+}
+
+/* Json diff row in split view - span full width */
+.split-json-diff-row {
+  display: none;
+  grid-template-columns: 1fr;
+  padding: 8px 12px 8px 28px;
+  font-size: 0.8em;
+  color: var(--color-fg-muted);
+  background: var(--color-canvas-subtle);
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.split-json-diff-row.open { display: block; }
+
+/* Divergence banner */
+.divergence-banner {
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+  background: var(--color-done-subtle);
+  border: 1px solid var(--color-done-fg);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: var(--color-done-fg);
+}
+
+/* Keyboard hint */
+.kbd-hint {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  padding: 4px 10px;
+  background: var(--color-canvas-subtle);
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  font-size: 0.7rem;
+  color: var(--color-fg-subtle);
+  opacity: 0.7;
+}
+kbd {
+  background: var(--color-canvas-inset);
+  border: 1px solid var(--color-border-default);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* No data state */
+.no-data { color: var(--color-fg-muted); padding: 3rem; text-align: center; }
+
+/* Identical badge */
+.identical-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--color-success-subtle);
+  color: var(--color-success-fg);
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-left: 0.5rem;
+}
+</style>
+</head>
+<body>
+<div class="container" id="app"></div>
+<div class="kbd-hint"><kbd>t</kbd> theme &middot; <kbd>1</kbd>/<kbd>2</kbd> view &middot; <kbd>e</kbd> expand all</div>
+
+<script>
+const DATA = /*__DATA__*/null/*__END__*/;
+
+(function() {
+  'use strict';
+  var app = document.getElementById('app');
+  if (!DATA) { app.innerHTML = '<p class="no-data">No data — payload was not injected.</p>'; return; }
+
+  var currentView = 'sidebyside'; // default to aligned split view
+  var allExpanded = false;
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function fmtDuration(nanos) {
+    if (nanos == null) return '\u2014';
+    if (nanos >= 1e9) return (nanos / 1e9).toFixed(2) + 's';
+    if (nanos >= 1e6) return (nanos / 1e6).toFixed(1) + 'ms';
+    if (nanos >= 1e3) return (nanos / 1e3).toFixed(0) + '\u00b5s';
+    return nanos + 'ns';
+  }
+
+  function indentStr(depth) {
+    var s = '';
+    for (var i = 0; i < depth; i++) s += '<span class="indent-guide"></span>';
+    return s;
+  }
+
+  function statusClass(status) {
+    if (status === 'ok') return 'status-ok';
+    if (status === 'error') return 'status-error';
+    return 'status-unset';
+  }
+
+  // Format a JSON value for display (compact).
+  function fmtValue(v) {
+    if (v === null || v === undefined) return 'null';
+    if (typeof v === 'string') return '"' + v + '"';
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  }
+
+  // Compute duration delta as percentage string.
+  function durationDelta(srcNanos, dstNanos) {
+    if (srcNanos == null || dstNanos == null || srcNanos === 0) return null;
+    var pct = ((dstNanos - srcNanos) / srcNanos) * 100;
+    if (Math.abs(pct) < 1) return null; // not significant
+    var sign = pct > 0 ? '+' : '';
+    return { pct: pct, label: sign + pct.toFixed(0) + '%' };
+  }
+
+  // Render duration delta badge HTML.
+  function durationDeltaHtml(srcNanos, dstNanos) {
+    var d = durationDelta(srcNanos, dstNanos);
+    if (!d) return '';
+    var cls = d.pct > 0 ? 'slower' : 'faster';
+    return '<span class="dur-delta ' + cls + '">' + d.label + '</span>';
+  }
+
+  var categoryLabels = {
+    errors: 'Errors',
+    performance: 'Performance',
+    deployment: 'Deployment',
+    http: 'HTTP',
+    other: 'Other'
+  };
+
+  var categoryOrder = ['errors', 'performance', 'deployment', 'http', 'other'];
+
+  function computeInsights() {
+    var insights = {
+      versionChange: null,
+      commitChange: null,
+      errorsIntroduced: [],
+      errorTypes: [],
+      errorMessages: [],
+      structuralDeleted: [],
+      structuralInserted: [],
+      durationDelta: null,
+      httpStatusChanges: [],
+      totalFieldDiffs: DATA.total_field_diffs || 0
+    };
+
+    var entries = DATA.entries;
+
+    // Root span duration delta.
+    if (entries.length > 0) {
+      var root = entries[0];
+      var srcDur = root.src_duration_ns != null ? root.src_duration_ns : null;
+      var dstDur = root.dst_duration_ns != null ? root.dst_duration_ns : null;
+      if (srcDur != null && dstDur != null && srcDur !== dstDur) {
+        var d = durationDelta(srcDur, dstDur);
+        insights.durationDelta = {
+          srcDur: srcDur,
+          dstDur: dstDur,
+          delta: d
+        };
+      }
+    }
+
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+
+      // Structural changes.
+      if (e.kind === 'deleted') {
+        insights.structuralDeleted.push(e.name);
+      }
+      if (e.kind === 'inserted') {
+        insights.structuralInserted.push(e.name);
+      }
+
+      // Scan json_diffs for specific patterns.
+      if (!e.json_diffs) continue;
+      for (var j = 0; j < e.json_diffs.length; j++) {
+        var jd = e.json_diffs[j];
+        var path = jd.path;
+        var change = jd.change;
+
+        // Version change (take first found).
+        if (path === 'meta.version' && change.type === 'modified' && !insights.versionChange) {
+          insights.versionChange = { old: change.old, new: change.new };
+        }
+
+        // Commit SHA.
+        if (path === 'meta.git.commit.sha' && change.type === 'modified' && !insights.commitChange) {
+          var oldSha = typeof change.old === 'string' ? change.old.substring(0, 8) : String(change.old);
+          var newSha = typeof change.new === 'string' ? change.new.substring(0, 8) : String(change.new);
+          insights.commitChange = { old: oldSha, new: newSha };
+        }
+
+        // Status ok -> error.
+        if (path === 'status' && change.type === 'modified') {
+          var oldSt = typeof change.old === 'string' ? change.old : '';
+          var newSt = typeof change.new === 'string' ? change.new : '';
+          if (oldSt === 'ok' && newSt === 'error') {
+            insights.errorsIntroduced.push(e.name);
+          }
+        }
+
+        // Error types.
+        if (path === 'meta.error.type' && (change.type === 'added' || change.type === 'modified')) {
+          var errType = change.type === 'added' ? change.value : change.new;
+          if (typeof errType === 'string') {
+            // Extract short class name.
+            var parts = errType.split('.');
+            var shortName = parts[parts.length - 1];
+            if (insights.errorTypes.indexOf(shortName) === -1) {
+              insights.errorTypes.push(shortName);
+            }
+          }
+        }
+
+        // Error messages (take first unique).
+        if (path === 'meta.error.message' && (change.type === 'added' || change.type === 'modified')) {
+          var msg = change.type === 'added' ? change.value : change.new;
+          if (typeof msg === 'string' && insights.errorMessages.indexOf(msg) === -1) {
+            insights.errorMessages.push(msg);
+          }
+        }
+
+        // HTTP status code changes.
+        if (path === 'meta.http.status_code' && change.type === 'modified') {
+          insights.httpStatusChanges.push({
+            span: e.name,
+            old: change.old,
+            new: change.new
+          });
+        }
+      }
+    }
+
+    return insights;
+  }
+
+  function buildErrorChain() {
+    var entries = DATA.entries;
+    // Find all entries where status went ok -> error, track deepest.
+    var errorEntries = [];
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (!e.json_diffs) continue;
+      for (var j = 0; j < e.json_diffs.length; j++) {
+        if (e.json_diffs[j].path === 'status' && e.json_diffs[j].change.type === 'modified') {
+          var old = e.json_diffs[j].change.old;
+          var nw = e.json_diffs[j].change.new;
+          if (old === 'ok' && nw === 'error') {
+            errorEntries.push({ index: i, entry: e });
+          }
+        }
+      }
+    }
+
+    if (errorEntries.length === 0) return null;
+
+    // Find the deepest error span (the likely root cause).
+    var deepest = errorEntries[0];
+    for (var i = 1; i < errorEntries.length; i++) {
+      if (errorEntries[i].entry.depth > deepest.entry.depth) {
+        deepest = errorEntries[i];
+      }
+    }
+
+    // Build chain from deepest to root by walking up through entries with errors.
+    // We collect all error entries sorted by depth (deep -> shallow).
+    var chain = [];
+    errorEntries.sort(function(a, b) { return b.entry.depth - a.entry.depth; });
+    var seenDepths = {};
+    for (var i = 0; i < errorEntries.length; i++) {
+      var d = errorEntries[i].entry.depth;
+      if (!seenDepths[d]) {
+        seenDepths[d] = true;
+        // Find any additional detail for this span (http status, etc).
+        var detail = '';
+        var ee = errorEntries[i].entry;
+        if (ee.json_diffs) {
+          for (var j = 0; j < ee.json_diffs.length; j++) {
+            var jd = ee.json_diffs[j];
+            if (jd.path === 'meta.http.status_code' && jd.change.type === 'modified') {
+              detail = jd.change.old + '\u2192' + jd.change.new;
+            }
+            if (jd.path === 'meta.resilience4j.retry.fail_after_max_attempts' && jd.change.type === 'modified') {
+              if (jd.change.new === true || jd.change.new === 'true') {
+                detail = 'retry exhausted';
+              }
+            }
+          }
+        }
+        chain.push({ name: ee.name, depth: d, detail: detail });
+      }
+    }
+
+    // Extract the root cause error type from the deepest span.
+    var rootCause = null;
+    var deepEntry = deepest.entry;
+    if (deepEntry.json_diffs) {
+      for (var j = 0; j < deepEntry.json_diffs.length; j++) {
+        if (deepEntry.json_diffs[j].path === 'meta.error.message') {
+          var ch = deepEntry.json_diffs[j].change;
+          rootCause = ch.type === 'added' ? ch.value : ch.new;
+          break;
+        }
+      }
+    }
+
+    return { chain: chain, rootCause: rootCause };
+  }
+
+  function renderJsonDiffs(jsonDiffs) {
+    // Group diffs by category.
+    var groups = {};
+    for (var j = 0; j < jsonDiffs.length; j++) {
+      var jd = jsonDiffs[j];
+      var cat = jd.category;
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(jd);
+    }
+
+    var html = '';
+    // Only show category headers if there are multiple categories.
+    var catCount = 0;
+    for (var k in groups) { if (groups.hasOwnProperty(k)) catCount++; }
+    var showHeaders = catCount > 1;
+
+    for (var ci = 0; ci < categoryOrder.length; ci++) {
+      var cat = categoryOrder[ci];
+      if (!groups[cat]) continue;
+      html += '<div class="diff-category">';
+      if (showHeaders) {
+        html += '<div class="diff-category-header cat-' + cat + '">' + categoryLabels[cat] + '</div>';
+      }
+      for (var j = 0; j < groups[cat].length; j++) {
+        var jd = groups[cat][j];
+        html += '<div class="json-diff-row">';
+        html += '<span class="path">' + esc(jd.path) + ':</span> ';
+        if (jd.change.type === 'added') {
+          html += '<span class="added">+ ' + esc(fmtValue(jd.change.value)) + '</span>';
+        } else if (jd.change.type === 'removed') {
+          html += '<span class="removed">\u2212 ' + esc(fmtValue(jd.change.value)) + '</span>';
+        } else if (jd.change.type === 'modified') {
+          html += '<span class="old">' + esc(fmtValue(jd.change.old)) + '</span> \u2192 <span class="new">' + esc(fmtValue(jd.change.new)) + '</span>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+    return html;
+  }
+
+  function renderStatusTransition(srcStatus, dstStatus) {
+    if (srcStatus === dstStatus) return '';
+    if (srcStatus === 'ok' && dstStatus === 'error') {
+      return '<span class="status-transition">ok <span class="arrow">\u2192</span> error</span>';
+    }
+    if (srcStatus === 'error' && dstStatus === 'ok') {
+      return '<span class="status-transition" style="background:var(--color-success-subtle);color:var(--color-success-fg);border-color:var(--color-success-fg)">error <span class="arrow">\u2192</span> ok</span>';
+    }
+    return '<span class="status-transition" style="background:var(--color-attention-subtle);color:var(--color-attention-fg);border-color:var(--color-attention-fg)">' +
+      esc(srcStatus) + ' <span class="arrow">\u2192</span> ' + esc(dstStatus) + '</span>';
+  }
+
+  function renderHeader() {
+    return '<div class="header">' +
+      '<h1>trace-diff</h1>' +
+      '<div class="controls">' +
+        '<button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme (t)">theme</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderSummary() {
+    var s = DATA.summary;
+    // Use pre-computed durations from root entry.
+    var rootEntry = DATA.entries.length > 0 ? DATA.entries[0] : null;
+    var srcDur = rootEntry && rootEntry.src_duration_ns != null ? rootEntry.src_duration_ns : null;
+    var dstDur = rootEntry && rootEntry.dst_duration_ns != null ? rootEntry.dst_duration_ns : null;
+
+    var totalFieldDiffs = DATA.total_field_diffs || 0;
+
+    var html = '<div class="summary-banner">';
+    html += '<div class="summary-stat"><span class="label">baseline:</span> <span class="value">' + esc(DATA.baseline_label) + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">candidate:</span> <span class="value">' + esc(DATA.candidate_label) + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">spans:</span> <span class="value">' + s.src_span_count + ' \u2192 ' + s.dst_span_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">matched:</span> <span class="value matched">' + s.matched_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">inserted:</span> <span class="value inserted">+' + s.inserted_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">deleted:</span> <span class="value deleted">\u2212' + s.deleted_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">modified:</span> <span class="value modified">' + s.modified_count + '</span></div>';
+    html += '<div class="summary-stat"><span class="label">field diffs:</span> <span class="value">' + totalFieldDiffs + '</span></div>';
+
+    if (srcDur != null || dstDur != null) {
+      var durHtml = fmtDuration(srcDur) + ' \u2192 ' + fmtDuration(dstDur);
+      if (srcDur != null && dstDur != null) {
+        durHtml += durationDeltaHtml(srcDur, dstDur);
+      }
+      html += '<div class="summary-stat"><span class="label">time:</span> <span class="value">' + durHtml + '</span></div>';
+    }
+
+    if (s.inserted_count === 0 && s.deleted_count === 0 && s.modified_count === 0) {
+      html += '<span class="identical-badge">identical</span>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function renderInsights() {
+    var ins = computeInsights();
+    var hasInsights = ins.versionChange || ins.commitChange ||
+      ins.errorsIntroduced.length > 0 || ins.structuralDeleted.length > 0 ||
+      ins.structuralInserted.length > 0 || ins.durationDelta ||
+      ins.httpStatusChanges.length > 0;
+
+    if (!hasInsights) return '';
+
+    var html = '<div class="insights-panel">';
+    html += '<div class="insights-header" id="insights-toggle">';
+    html += '<span class="insights-title">What Changed</span>';
+    html += '<span class="insights-toggle" id="insights-toggle-label">collapse</span>';
+    html += '</div>';
+    html += '<div class="insights-body" id="insights-body">';
+
+    // Deployment.
+    if (ins.versionChange) {
+      html += '<div class="insight-row">';
+      html += '<span class="insight-icon deploy">D</span>';
+      html += '<span class="insight-label">version</span>';
+      html += '<span class="insight-value"><span class="old">' + esc(fmtValue(ins.versionChange.old)) + '</span> \u2192 <span class="new">' + esc(fmtValue(ins.versionChange.new)) + '</span></span>';
+      html += '</div>';
+    }
+    if (ins.commitChange) {
+      html += '<div class="insight-row">';
+      html += '<span class="insight-icon deploy">D</span>';
+      html += '<span class="insight-label">commit</span>';
+      html += '<span class="insight-value"><span class="old">' + esc(ins.commitChange.old) + '</span> \u2192 <span class="new">' + esc(ins.commitChange.new) + '</span></span>';
+      html += '</div>';
+    }
+
+    // Errors.
+    if (ins.errorsIntroduced.length > 0) {
+      html += '<div class="insight-row">';
+      html += '<span class="insight-icon error">E</span>';
+      html += '<span class="insight-label">errors</span>';
+      html += '<span class="insight-value"><span class="danger">' + ins.errorsIntroduced.length + ' span' + (ins.errorsIntroduced.length > 1 ? 's' : '') + ' went ok \u2192 error</span>';
+      if (ins.errorTypes.length > 0) {
+        html += ' <span class="muted">\u2014 ' + esc(ins.errorTypes.join(', ')) + '</span>';
+      }
+      html += '</span></div>';
+    }
+    if (ins.errorMessages.length > 0) {
+      for (var i = 0; i < ins.errorMessages.length; i++) {
+        html += '<div class="insight-row">';
+        html += '<span class="insight-icon error">E</span>';
+        html += '<span class="insight-label">message</span>';
+        html += '<span class="insight-value" style="color:var(--color-danger-fg)">' + esc(ins.errorMessages[i]) + '</span>';
+        html += '</div>';
+      }
+    }
+
+    // Performance.
+    if (ins.durationDelta) {
+      var dd = ins.durationDelta;
+      html += '<div class="insight-row">';
+      html += '<span class="insight-icon perf">P</span>';
+      html += '<span class="insight-label">duration</span>';
+      html += '<span class="insight-value">' + fmtDuration(dd.srcDur) + ' \u2192 ' + fmtDuration(dd.dstDur);
+      if (dd.delta) {
+        var cls = dd.delta.pct > 0 ? 'slower' : 'faster';
+        html += ' <span class="dur-delta ' + cls + '">' + dd.delta.label + '</span>';
+      }
+      html += '</span></div>';
+    }
+
+    // HTTP status changes.
+    for (var i = 0; i < ins.httpStatusChanges.length; i++) {
+      var hc = ins.httpStatusChanges[i];
+      html += '<div class="insight-row">';
+      html += '<span class="insight-icon http">H</span>';
+      html += '<span class="insight-label">' + esc(hc.span) + '</span>';
+      html += '<span class="insight-value"><span class="old">' + esc(String(hc.old)) + '</span> \u2192 <span class="new">' + esc(String(hc.new)) + '</span></span>';
+      html += '</div>';
+    }
+
+    // Structural.
+    if (ins.structuralDeleted.length > 0) {
+      html += '<div class="insight-row">';
+      html += '<span class="insight-icon struct">S</span>';
+      html += '<span class="insight-label">deleted</span>';
+      html += '<span class="insight-value">' + ins.structuralDeleted.length + ' span' + (ins.structuralDeleted.length > 1 ? 's' : '') + ': ' +
+        ins.structuralDeleted.map(function(n) { return '<span class="old">' + esc(n) + '</span>'; }).join(', ') + '</span>';
+      html += '</div>';
+    }
+    if (ins.structuralInserted.length > 0) {
+      html += '<div class="insight-row">';
+      html += '<span class="insight-icon struct">S</span>';
+      html += '<span class="insight-label">inserted</span>';
+      html += '<span class="insight-value">' + ins.structuralInserted.length + ' span' + (ins.structuralInserted.length > 1 ? 's' : '') + ': ' +
+        ins.structuralInserted.map(function(n) { return '<span class="new">' + esc(n) + '</span>'; }).join(', ') + '</span>';
+      html += '</div>';
+    }
+
+    // Error causal chain.
+    var errorChain = buildErrorChain();
+    if (errorChain) {
+      html += '<div class="error-chain">';
+      html += '<div class="error-chain-title">Error Propagation</div>';
+      html += '<div class="error-chain-path">';
+      for (var i = 0; i < errorChain.chain.length; i++) {
+        if (i > 0) html += '<span class="error-chain-arrow">\u2192</span>';
+        var step = errorChain.chain[i];
+        html += '<span class="error-chain-step">' + esc(step.name);
+        if (step.detail) html += ' <span class="detail">(' + esc(step.detail) + ')</span>';
+        html += '</span>';
+      }
+      html += '</div>';
+      if (errorChain.rootCause) {
+        html += '<div class="error-chain-cause">' + esc(errorChain.rootCause) + '</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>'; // insights-body
+    html += '</div>'; // insights-panel
+    return html;
+  }
+
+  function renderDivergence() {
+    if (DATA.divergence_index == null) return '';
+    var entry = DATA.entries[DATA.divergence_index];
+    return '<div class="divergence-banner">Divergence at depth ' +
+      entry.depth + ': <strong>' + esc(entry.name) + '</strong> \u2014 children differ between baseline and candidate.</div>';
+  }
+
+  function renderViewTabs() {
+    return '<div class="view-tabs">' +
+      '<button class="view-tab' + (currentView === 'sidebyside' ? ' active' : '') + '" data-view="sidebyside">Split diff</button>' +
+      '<button class="view-tab' + (currentView === 'unified' ? ' active' : '') + '" data-view="unified">Unified</button>' +
+      '<span class="spacer"></span>' +
+      '<button class="expand-all-btn" id="expand-all-btn">' + (allExpanded ? 'Collapse all' : 'Expand all') + '</button>' +
+    '</div>';
+  }
+
+  function renderUnified() {
+    var entries = DATA.entries;
+    var html = '<div class="diff-view">';
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      var kind = e.kind;
+      var hasDiffs = e.json_diffs && e.json_diffs.length > 0;
+      var cls = kind;
+      if (kind === 'matched' && hasDiffs) cls = 'modified';
+      if (DATA.divergence_index != null && i === DATA.divergence_index) cls += ' divergence-point';
+      if (hasDiffs) cls += ' expandable';
+
+      var marker = kind === 'inserted' ? '+' : kind === 'deleted' ? '\u2212' : hasDiffs ? '~' : ' ';
+
+      // Use pre-computed status from Rust payload.
+      var statusHtml = '';
+      if (e.side === 'both') {
+        var srcStatus = e.src_status || 'unset';
+        var dstStatus = e.dst_status || 'unset';
+        var transition = renderStatusTransition(srcStatus, dstStatus);
+        if (transition) {
+          statusHtml = transition;
+        } else {
+          statusHtml = '<span class="' + statusClass(dstStatus) + '">' + esc(dstStatus) + '</span>';
+        }
+      } else {
+        var status = e.src_status || e.dst_status || 'unset';
+        statusHtml = '<span class="' + statusClass(status) + '">' + esc(status) + '</span>';
+      }
+
+      // Duration with delta (pre-computed).
+      var durHtml;
+      if (e.side === 'both') {
+        var srcDur = e.src_duration_ns != null ? e.src_duration_ns : null;
+        var dstDur = e.dst_duration_ns != null ? e.dst_duration_ns : null;
+        if (srcDur != null && dstDur != null && srcDur !== dstDur) {
+          durHtml = '<span class="dur-changed">' + fmtDuration(srcDur) +
+            '</span><span class="dur-arrow">\u2192</span><span class="dur-changed">' +
+            fmtDuration(dstDur) + '</span>' + durationDeltaHtml(srcDur, dstDur);
+        } else {
+          durHtml = fmtDuration(dstDur != null ? dstDur : srcDur);
+        }
+      } else {
+        var dur = e.src_duration_ns != null ? e.src_duration_ns : e.dst_duration_ns;
+        durHtml = fmtDuration(dur != null ? dur : null);
+      }
+
+      html += '<div class="diff-entry ' + cls + '"' + (hasDiffs ? ' data-toggle-idx="' + i + '"' : '') + '>';
+      html += '<span class="marker">' + marker + '</span>';
+      html += '<span class="name-col">' + indentStr(e.depth) + esc(e.name);
+      if (hasDiffs) {
+        html += ' <span class="diff-toggle" data-idx="' + i + '">(' + e.json_diffs.length + ' change' + (e.json_diffs.length > 1 ? 's' : '') + ')</span>';
+      }
+      html += '</span>';
+      html += '<span class="duration-col">' + durHtml + '</span>';
+      html += '<span class="status-col">' + statusHtml + '</span>';
+      html += '</div>';
+
+      // JSON diff panel (hidden by default, or open if allExpanded).
+      if (hasDiffs) {
+        html += '<div class="json-diff-panel' + (allExpanded ? ' open' : '') + '" id="diff-panel-' + i + '">';
+        html += renderJsonDiffs(e.json_diffs);
+        html += '</div>';
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderSideBySide() {
+    var entries = DATA.entries;
+    // Extract root durations for the header.
+    var rootEntry = entries.length > 0 ? entries[0] : null;
+    var srcRootDur = rootEntry && rootEntry.src_duration_ns != null ? rootEntry.src_duration_ns : null;
+    var dstRootDur = rootEntry && rootEntry.dst_duration_ns != null ? rootEntry.dst_duration_ns : null;
+    var rootDeltaHtml = durationDeltaHtml(srcRootDur, dstRootDur);
+
+    var html = '<div class="split-diff">';
+
+    // Header row with labels.
+    html += '<div class="split-header">';
+    html += '<div class="split-header-cell"><span>' + esc(DATA.baseline_label) + '</span><span class="dur">' + fmtDuration(srcRootDur) + '</span></div>';
+    html += '<div class="split-header-cell"><span>' + esc(DATA.candidate_label) + '</span><span class="dur">' + fmtDuration(dstRootDur) + rootDeltaHtml + '</span></div>';
+    html += '</div>';
+
+    html += '<div class="split-body">';
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      var kind = e.kind;
+      var hasDiffs = e.json_diffs && e.json_diffs.length > 0;
+      var rowCls = '';
+      if (DATA.divergence_index != null && i === DATA.divergence_index) rowCls += ' divergence-point';
+      if (hasDiffs) rowCls += ' expandable';
+
+      html += '<div class="split-row' + rowCls + '"' + (hasDiffs ? ' data-toggle-idx="' + i + '"' : '') + '>';
+
+      if (kind === 'matched') {
+        // Both sides present.
+        var cellCls = hasDiffs ? ' cell-modified' : '';
+        var srcDur = e.src_duration_ns != null ? e.src_duration_ns : null;
+        var dstDur = e.dst_duration_ns != null ? e.dst_duration_ns : null;
+        var srcStatus = e.src_status || 'unset';
+        var dstStatus = e.dst_status || 'unset';
+        var deltaHtml = durationDeltaHtml(srcDur, dstDur);
+
+        // Status display: transition pill on candidate side if changed.
+        var srcStatusHtml = '<span class="' + statusClass(srcStatus) + '">' + esc(srcStatus) + '</span>';
+        var dstStatusHtml;
+        var transition = renderStatusTransition(srcStatus, dstStatus);
+        if (transition) {
+          dstStatusHtml = transition;
+        } else {
+          dstStatusHtml = '<span class="' + statusClass(dstStatus) + '">' + esc(dstStatus) + '</span>';
+        }
+
+        // Left (baseline) cell.
+        html += '<div class="split-cell' + cellCls + '">';
+        html += '<span class="name">' + indentStr(e.depth) + esc(e.name);
+        if (hasDiffs) {
+          html += ' <span class="diff-toggle" data-idx="' + i + '">~' + e.json_diffs.length + '</span>';
+        }
+        html += '</span>';
+        html += '<span class="dur">' + fmtDuration(srcDur) + '</span>';
+        html += '<span class="st">' + srcStatusHtml + '</span>';
+        html += '</div>';
+
+        // Right (candidate) cell.
+        html += '<div class="split-cell' + cellCls + '">';
+        html += '<span class="name">' + indentStr(e.depth) + esc(e.name);
+        if (hasDiffs) {
+          html += ' <span class="diff-toggle" data-idx="' + i + '">~' + e.json_diffs.length + '</span>';
+        }
+        html += '</span>';
+        html += '<span class="dur">' + fmtDuration(dstDur) + deltaHtml + '</span>';
+        html += '<span class="st">' + dstStatusHtml + '</span>';
+        html += '</div>';
+
+      } else if (kind === 'deleted') {
+        // Left side only (baseline).
+        var delDur = e.src_duration_ns != null ? e.src_duration_ns : null;
+        var delStatus = e.src_status || 'unset';
+        html += '<div class="split-cell cell-deleted">';
+        html += '<span class="name">' + indentStr(e.depth) + '<span style="color:var(--color-danger-fg)">\u2212 ' + esc(e.name) + '</span></span>';
+        html += '<span class="dur">' + fmtDuration(delDur) + '</span>';
+        html += '<span class="st ' + statusClass(delStatus) + '">' + esc(delStatus) + '</span>';
+        html += '</div>';
+
+        // Right side blank.
+        html += '<div class="split-cell cell-blank"></div>';
+
+      } else if (kind === 'inserted') {
+        // Left side blank.
+        html += '<div class="split-cell cell-blank"></div>';
+
+        // Right side only (candidate).
+        var insDur = e.dst_duration_ns != null ? e.dst_duration_ns : null;
+        var insStatus = e.dst_status || 'unset';
+        html += '<div class="split-cell cell-inserted">';
+        html += '<span class="name">' + indentStr(e.depth) + '<span style="color:var(--color-success-fg)">+ ' + esc(e.name) + '</span></span>';
+        html += '<span class="dur">' + fmtDuration(insDur) + '</span>';
+        html += '<span class="st ' + statusClass(insStatus) + '">' + esc(insStatus) + '</span>';
+        html += '</div>';
+      }
+
+      html += '</div>'; // end split-row
+
+      // JSON diff row (hidden by default, spans full width).
+      if (hasDiffs) {
+        html += '<div class="split-json-diff-row' + (allExpanded ? ' open' : '') + '" id="diff-panel-' + i + '">';
+        html += renderJsonDiffs(e.json_diffs);
+        html += '</div>';
+      }
+    }
+    html += '</div>'; // end split-body
+    html += '</div>'; // end split-diff
+    return html;
+  }
+
+  function render() {
+    var html = renderHeader();
+    html += renderSummary();
+    html += renderInsights();
+    html += renderDivergence();
+    html += renderViewTabs();
+    if (currentView === 'unified') {
+      html += renderUnified();
+    } else {
+      html += renderSideBySide();
+    }
+    app.innerHTML = html;
+    bindEvents();
+  }
+
+  function bindEvents() {
+    // View tabs.
+    var tabs = document.querySelectorAll('.view-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].addEventListener('click', function() {
+        currentView = this.getAttribute('data-view');
+        render();
+      });
+    }
+
+    // JSON diff toggles (the small clickable text).
+    var toggles = document.querySelectorAll('.diff-toggle');
+    for (var i = 0; i < toggles.length; i++) {
+      toggles[i].addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var idx = this.getAttribute('data-idx');
+        var panel = document.getElementById('diff-panel-' + idx);
+        if (panel) panel.classList.toggle('open');
+      });
+    }
+
+    // Row click to expand (for rows with diffs).
+    var expandableRows = document.querySelectorAll('[data-toggle-idx]');
+    for (var i = 0; i < expandableRows.length; i++) {
+      expandableRows[i].addEventListener('click', function(ev) {
+        // Don't toggle if they clicked the diff-toggle itself (handled above).
+        if (ev.target.classList.contains('diff-toggle')) return;
+        var idx = this.getAttribute('data-toggle-idx');
+        var panel = document.getElementById('diff-panel-' + idx);
+        if (panel) panel.classList.toggle('open');
+      });
+    }
+
+    // Expand/collapse all button.
+    var expandBtn = document.getElementById('expand-all-btn');
+    if (expandBtn) {
+      expandBtn.addEventListener('click', function() {
+        allExpanded = !allExpanded;
+        render();
+      });
+    }
+
+    // Insights panel toggle.
+    var insightsToggle = document.getElementById('insights-toggle');
+    if (insightsToggle) {
+      insightsToggle.addEventListener('click', function() {
+        var body = document.getElementById('insights-body');
+        var label = document.getElementById('insights-toggle-label');
+        if (body) {
+          body.classList.toggle('collapsed');
+          if (label) label.textContent = body.classList.contains('collapsed') ? 'expand' : 'collapse';
+        }
+      });
+    }
+  }
+
+  render();
+
+  document.addEventListener('keydown', function(ev) {
+    if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA') return;
+    if (ev.key === 't') toggleTheme();
+    if (ev.key === '1') { currentView = 'sidebyside'; render(); }
+    if (ev.key === '2') { currentView = 'unified'; render(); }
+    if (ev.key === 'e') { allExpanded = !allExpanded; render(); }
+  });
+})();
+
+function toggleTheme() {
+  var html = document.documentElement;
+  var current = html.style.colorScheme;
+  html.style.colorScheme = current === 'light' ? 'dark' : 'light';
+}
+</script>
+</body>
+</html>

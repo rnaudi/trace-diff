@@ -1,0 +1,99 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "agent-service"}}
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {"name": "agent-lib", "version": "0.1.0"},
+          "spans": [
+            {
+              "traceId": "aaaaaaaaaaaaaaaa1111111111111111",
+              "spanId": "00000000000000A1",
+              "name": "agent.execute",
+              "kind": 1,
+              "startTimeUnixNano": "2000000000",
+              "endTimeUnixNano": "7000000000",
+              "attributes": [
+                {"key": "agent.task", "value": {"stringValue": "fix-bug-42"}}
+              ],
+              "status": {"code": 1}
+            },
+            {
+              "traceId": "aaaaaaaaaaaaaaaa1111111111111111",
+              "spanId": "00000000000000A2",
+              "parentSpanId": "00000000000000A1",
+              "name": "llm.call",
+              "kind": 3,
+              "startTimeUnixNano": "2000000000",
+              "endTimeUnixNano": "3000000000",
+              "attributes": [
+                {"key": "llm.model", "value": {"stringValue": "claude-3.5-sonnet"}},
+                {"key": "llm.prompt_tokens", "value": {"intValue": "1200"}}
+              ],
+              "status": {}
+            },
+            {
+              "traceId": "aaaaaaaaaaaaaaaa1111111111111111",
+              "spanId": "00000000000000A3",
+              "parentSpanId": "00000000000000A1",
+              "name": "tool.call",
+              "kind": 3,
+              "startTimeUnixNano": "3000000000",
+              "endTimeUnixNano": "3500000000",
+              "attributes": [
+                {"key": "tool.name", "value": {"stringValue": "read_file"}},
+                {"key": "tool.params.path", "value": {"stringValue": "auth.py"}}
+              ],
+              "status": {"code": 1}
+            },
+            {
+              "traceId": "aaaaaaaaaaaaaaaa1111111111111111",
+              "spanId": "00000000000000A4",
+              "parentSpanId": "00000000000000A1",
+              "name": "llm.call",
+              "kind": 3,
+              "startTimeUnixNano": "3500000000",
+              "endTimeUnixNano": "4500000000",
+              "attributes": [
+                {"key": "llm.model", "value": {"stringValue": "claude-4-opus"}},
+                {"key": "llm.prompt_tokens", "value": {"intValue": "5200"}}
+              ],
+              "status": {}
+            },
+            {
+              "traceId": "aaaaaaaaaaaaaaaa1111111111111111",
+              "spanId": "00000000000000A5",
+              "parentSpanId": "00000000000000A1",
+              "name": "tool.call",
+              "kind": 3,
+              "startTimeUnixNano": "4500000000",
+              "endTimeUnixNano": "5000000000",
+              "attributes": [
+                {"key": "tool.name", "value": {"stringValue": "edit_file"}},
+                {"key": "tool.params.path", "value": {"stringValue": "auth.py"}}
+              ],
+              "status": {"code": 1}
+            },
+            {
+              "traceId": "aaaaaaaaaaaaaaaa1111111111111111",
+              "spanId": "00000000000000A6",
+              "parentSpanId": "00000000000000A1",
+              "name": "agent.review",
+              "kind": 1,
+              "startTimeUnixNano": "5000000000",
+              "endTimeUnixNano": "6000000000",
+              "attributes": [
+                {"key": "agent.reviewer", "value": {"stringValue": "senior-dev"}}
+              ],
+              "status": {"code": 1}
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
